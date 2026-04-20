@@ -1,0 +1,184 @@
+# ============================================================
+# Skynity ISP — Coolify Compose File
+# ------------------------------------------------------------
+# Use this file when deploying through Coolify (self-hosted PaaS).
+#
+# Why a separate file?
+#   Coolify ships its own Traefik reverse-proxy that already owns
+#   host ports 80/443 and handles Let's Encrypt automatically.
+#   So we DROP the Caddy service and let Coolify route traffic
+#   directly to the `frontend` container.
+#
+# Setup in Coolify UI:
+#   1. New Resource → Docker Compose (Public/Private repo)
+#   2. Repository: https://github.com/samimtsbd19-commits/skynity-isp
+#   3. Branch: main
+#   4. Compose file path: docker-compose.coolify.yml
+#   5. After detection, open the "frontend" service:
+#        - Set Domain: https://wifi.skynity.org
+#        - Port: 80
+#      Coolify will wire up Traefik + auto-SSL for that domain.
+#   6. Fill environment variables (see .env.example) and Deploy.
+# ============================================================
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME:-skynity}
+      MYSQL_USER: ${DB_USER:-skynity}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      TZ: ${APP_TIMEZONE:-Asia/Dhaka}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=caching_sha2_password
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-p${DB_ROOT_PASSWORD}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  migrate:
+    build:
+      context: ./backend
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-skynity}
+      DB_USER: ${DB_USER:-skynity}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-0:placeholder}
+      TELEGRAM_ADMIN_IDS: ${TELEGRAM_ADMIN_IDS:-}
+      JWT_SECRET: ${JWT_SECRET}
+      SESSION_SECRET: ${SESSION_SECRET}
+    command: ["node", "src/database/migrate.js"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-skynity}
+      DB_USER: ${DB_USER:-skynity}
+      DB_PASSWORD: ${DB_PASSWORD}
+
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ADMIN_IDS: ${TELEGRAM_ADMIN_IDS:-}
+
+      MIKROTIK_HOST: ${MIKROTIK_HOST:-}
+      MIKROTIK_PORT: ${MIKROTIK_PORT:-443}
+      MIKROTIK_USERNAME: ${MIKROTIK_USERNAME:-}
+      MIKROTIK_PASSWORD: ${MIKROTIK_PASSWORD:-}
+      MIKROTIK_USE_SSL: ${MIKROTIK_USE_SSL:-true}
+      MIKROTIK_REJECT_UNAUTHORIZED: ${MIKROTIK_REJECT_UNAUTHORIZED:-false}
+
+      SNMP_ENABLED: ${SNMP_ENABLED:-false}
+      SNMP_COMMUNITY: ${SNMP_COMMUNITY:-public}
+      SNMP_PORT: ${SNMP_PORT:-161}
+      SNMP_VERSION: ${SNMP_VERSION:-2c}
+      SNMP_TIMEOUT_MS: ${SNMP_TIMEOUT_MS:-2500}
+
+      BKASH_NUMBER: ${BKASH_NUMBER:-}
+      BKASH_TYPE: ${BKASH_TYPE:-personal}
+      NAGAD_NUMBER: ${NAGAD_NUMBER:-}
+      NAGAD_TYPE: ${NAGAD_TYPE:-personal}
+
+      JWT_SECRET: ${JWT_SECRET}
+      SESSION_SECRET: ${SESSION_SECRET}
+
+      APP_NAME: ${APP_NAME:-Skynity ISP}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Dhaka}
+      CURRENCY: ${CURRENCY:-BDT}
+      CURRENCY_SYMBOL: ${CURRENCY_SYMBOL:-৳}
+
+      UPLOAD_DIR: /app/uploads
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-5}
+
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://${DOMAIN:-wifi.skynity.org}}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - uploads:/app/uploads
+    expose:
+      - "3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # Public-facing service. Coolify's Traefik will route
+  # https://${DOMAIN} → frontend:80 and handle SSL.
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    expose:
+      - "80"
+    # The magic env var tells Coolify which port to expose publicly.
+    # Coolify will read SERVICE_FQDN_FRONTEND from the UI Domain field.
+    environment:
+      SERVICE_FQDN_FRONTEND_80: /
+
+volumes:
+  mysql_data:
+  redis_data:
+  uploads:

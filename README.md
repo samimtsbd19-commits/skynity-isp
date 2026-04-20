@@ -28,6 +28,16 @@ A complete ISP management platform for **MikroTik**-based networks in Bangladesh
 
 Full walkthrough with screenshots-worth of detail: **[`docs/HOSTINGER_DEPLOY.md`](docs/HOSTINGER_DEPLOY.md)**.
 
+## 🧩 Want multiple projects on one VPS? Use Coolify
+
+If you plan to host **Skynity-ISP plus other apps** (blog, Ghost, Nextcloud, a second dashboard…) on the same VPS, install **[Coolify](https://coolify.io)** — a free, self-hosted Heroku/Vercel alternative. It gives you:
+
+- A single web UI to deploy any GitHub repo (Docker Compose, Dockerfile, static site)
+- Automatic Let's Encrypt SSL for every domain/subdomain (via built-in Traefik)
+- One-click databases, backups, auto-deploy on `git push`
+
+Use the Coolify-specific compose file [`docker-compose.coolify.yml`](docker-compose.coolify.yml) (it omits Caddy because Coolify's Traefik handles HTTPS). Full step-by-step guide in Bengali + English: **[`docs/COOLIFY_DEPLOY.md`](docs/COOLIFY_DEPLOY.md)**.
+
 ## 🚀 Manual Deploy (any Ubuntu/Debian VPS)
 
 ```bash
@@ -57,14 +67,16 @@ Full guide: [`docs/DEPLOY.md`](docs/DEPLOY.md) · WireGuard: [`docs/WIREGUARD.md
 
 ```
 skynity-isp/
-├── docker-compose.yml   # ← root: deploy this
-├── .env.example         # ← copy to .env and fill in
-├── backend/             # Node.js: bot + API + jobs + MikroTik client
-├── frontend/            # React dashboard
+├── docker-compose.yml           # ← Hostinger Docker Manager / standalone
+├── docker-compose.coolify.yml   # ← Coolify (no Caddy, Traefik-fronted)
+├── .env.example                 # ← copy to .env and fill in
+├── backend/                     # Node.js: bot + API + jobs + MikroTik client
+├── frontend/                    # React dashboard
 ├── docker/
-│   └── Caddyfile        # Auto-HTTPS config
+│   └── Caddyfile                # Auto-HTTPS config (for non-Coolify deploys)
 └── docs/
-    ├── HOSTINGER_DEPLOY.md   # ← start here for Hostinger VPS
+    ├── HOSTINGER_DEPLOY.md      # ← Hostinger VPS Docker Manager
+    ├── COOLIFY_DEPLOY.md        # ← Multi-project deploy via Coolify
     ├── DEPLOY.md
     ├── WIREGUARD.md
     └── ADMIN_COMMANDS.md
