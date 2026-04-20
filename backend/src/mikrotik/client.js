@@ -67,9 +67,57 @@ export class MikrotikClient {
     return { ok: true, uptime: r.uptime, version: r.version, boardName: r['board-name'] };
   }
 
-  async systemResource() { return this.get('/system/resource'); }
-  async systemIdentity() { return this.get('/system/identity'); }
-  async interfaces() { return this.get('/interface'); }
+  async systemResource()   { return this.get('/system/resource'); }
+  async systemIdentity()   { return this.get('/system/identity'); }
+  async systemHealth()     { return this.get('/system/health').catch(() => []); }
+  async systemRouterboard(){ return this.get('/system/routerboard').catch(() => ({})); }
+  async systemLicense()    { return this.get('/system/license').catch(() => ({})); }
+  async interfaces()       { return this.get('/interface'); }
+
+  /**
+   * Runs `/interface/ethernet/monitor once=yes name=<iface>` on the
+   * router. On SFP+ / SFP ports this returns the optical module
+   * diagnostics (Rx power, Tx power, temperature, wavelength, …).
+   * RouterOS exposes this as a POST on the REST API.
+   */
+  async ethernetMonitor(name) {
+    try {
+      const r = await this._request('POST', '/interface/ethernet/monitor', {
+        numbers: name, once: 'true',
+      });
+      return Array.isArray(r) ? r[0] : r;
+    } catch { return null; }
+  }
+
+  /**
+   * Runs `/tool/ping count=N address=<host>`. Because the REST
+   * endpoint streams results we ask for a fixed count and average
+   * them client-side.
+   */
+  async pingHost(host, count = 4) {
+    try {
+      const r = await this._request('POST', '/ping', {
+        address: host,
+        count: String(count),
+      });
+      const arr = Array.isArray(r) ? r : [r];
+      const hits = arr.filter((x) => x && x.status !== 'timeout' && x['time'] != null);
+      const times = hits
+        .map((x) => Number(String(x.time).replace(/[^\d.]/g, '')))
+        .filter((n) => !Number.isNaN(n));
+      const lost = Number(arr[arr.length - 1]?.['packet-loss']);
+      return {
+        sent: count,
+        received: hits.length,
+        loss_pct: Number.isFinite(lost) ? lost : Math.round(((count - hits.length) / count) * 100),
+        rtt_min: times.length ? Math.min(...times) : null,
+        rtt_avg: times.length ? times.reduce((a, b) => a + b, 0) / times.length : null,
+        rtt_max: times.length ? Math.max(...times) : null,
+      };
+    } catch (err) {
+      return { sent: count, received: 0, loss_pct: 100, rtt_min: null, rtt_avg: null, rtt_max: null, error: err.message };
+    }
+  }
 
   // ---------- PPP / PPPoE ----------
   async listPppSecrets() { return this.get('/ppp/secret'); }

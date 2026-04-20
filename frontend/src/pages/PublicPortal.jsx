@@ -17,6 +17,7 @@ import {
   useNavigate, useParams, useSearchParams, Link,
 } from 'react-router-dom';
 import axios from 'axios';
+import { useLang, useT, LANG_LABELS } from '../i18n';
 
 const api = axios.create({ baseURL: '/api/portal', timeout: 20000 });
 
@@ -24,6 +25,8 @@ const api = axios.create({ baseURL: '/api/portal', timeout: 20000 });
 function Layout({ children, branding, support }) {
   const color = branding?.primary_color || '#f59e0b';
   const name = branding?.name || 'Skynity ISP';
+  const { lang, setLang, available } = useLang();
+  const t = useT();
   return (
     <div style={{
       minHeight: '100vh', background: '#0b0b0d', color: '#e7e7e9',
@@ -61,14 +64,31 @@ function Layout({ children, branding, support }) {
         .err{color:#ff6b6b;font-size:12px;margin-top:8px}
       `}</style>
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '24px 16px 80px' }}>
+        {/* Language switcher — top-right corner, always accessible */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: -16 }}>
+          <select
+            value={lang}
+            onChange={(e) => setLang(e.target.value)}
+            style={{
+              width: 'auto', padding: '4px 8px', fontSize: 12,
+              background: '#16161a', border: '1px solid #2a2a30', borderRadius: 4,
+              color: '#cbd5e1',
+            }}
+            aria-label={t('common.language')}
+          >
+            {available.map((code) => (
+              <option key={code} value={code}>{LANG_LABELS[code] || code}</option>
+            ))}
+          </select>
+        </div>
         <header style={{ textAlign: 'center', padding: '24px 0' }}>
           {branding?.logo_url
             ? <img src={branding.logo_url} alt={name} style={{ height: 48, marginBottom: 8 }} />
             : null}
           <h1 style={{ margin: 0, fontSize: 28, letterSpacing: '-.02em' }}>
-            {name} <em style={{ color }}>portal</em>
+            {name} <em style={{ color }}>{lang === 'bn' ? 'পোর্টাল' : 'portal'}</em>
           </h1>
-          <p className="muted" style={{ margin: '6px 0 0' }}>Buy WiFi access in minutes</p>
+          <p className="muted" style={{ margin: '6px 0 0' }}>{t('portal.tagline')}</p>
         </header>
         {children}
         <PortalFooter branding={branding} support={support} />
@@ -84,6 +104,7 @@ function Layout({ children, branding, support }) {
 // ===================================================================
 function SupportFab({ support, color }) {
   const [open, setOpen] = useState(false);
+  const t = useT();
   if (!support) return null;
   const channels = [];
   if (support.whatsapp) channels.push({
@@ -110,7 +131,8 @@ function SupportFab({ support, color }) {
     <>
       <button
         onClick={() => setOpen((v) => !v)}
-        aria-label="Chat with support"
+        aria-label={t('portal.chat')}
+        title={t('portal.chat')}
         style={{
           position: 'fixed', right: 16, bottom: 16, zIndex: 90,
           width: 54, height: 54, borderRadius: '50%', border: 0, cursor: 'pointer',
@@ -158,13 +180,14 @@ function PortalFooter({ branding, support }) {
   const color = branding?.primary_color || '#f59e0b';
   const s = support || {};
   const hasSocial = s.facebook || s.youtube || s.website;
+  const t = useT();
   return (
     <footer style={{
       marginTop: 40, paddingTop: 20, borderTop: '1px solid #2a2a30',
       textAlign: 'center', fontSize: 12, color: '#78787e',
     }}>
       <div style={{ display: 'flex', justifyContent: 'center', gap: 16, flexWrap: 'wrap', marginBottom: 10 }}>
-        <Link to="/portal/help" style={{ color }}>Help & Guide</Link>
+        <Link to="/portal/help" style={{ color }}>{t('portal.help')}</Link>
         {s.facebook && <a href={s.facebook} target="_blank" rel="noopener noreferrer">Facebook</a>}
         {s.youtube  && <a href={s.youtube}  target="_blank" rel="noopener noreferrer">YouTube</a>}
         {s.website  && <a href={s.website}  target="_blank" rel="noopener noreferrer">Website</a>}
@@ -188,8 +211,9 @@ function useBranding() {
 function Landing() {
   const nav = useNavigate();
   const info = useBranding();
+  const t = useT();
 
-  if (!info) return <Layout><div className="muted" style={{ textAlign: 'center' }}>Loading…</div></Layout>;
+  if (!info) return <Layout><div className="muted" style={{ textAlign: 'center' }}>{t('common.loading')}</div></Layout>;
 
   const pkgs = info.packages || [];
   const sym = info.currency_symbol || '৳';
@@ -262,13 +286,13 @@ function Landing() {
 
       <div style={{ marginTop: 32, display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))' }}>
         {flags.vouchers_portal !== false && (
-          <Link to="/portal/redeem" className="btn">🎟 Redeem voucher</Link>
+          <Link to="/portal/redeem" className="btn">🎟 {t('portal.redeem')}</Link>
         )}
-        <Link to="/portal/login"  className="btn btn-ghost">↻ Returning customer login</Link>
+        <Link to="/portal/login"  className="btn btn-ghost">↻ {t('portal.login')}</Link>
         {flags.customer_accounts && (
-          <Link to="/portal/account" className="btn btn-ghost">👤 My account</Link>
+          <Link to="/portal/account" className="btn btn-ghost">👤 {t('portal.myAccount')}</Link>
         )}
-        <Link to="/portal/status" className="btn btn-ghost">🔎 Check order status</Link>
+        <Link to="/portal/status" className="btn btn-ghost">🔎 {t('portal.checkStatus')}</Link>
       </div>
 
       {/* App download row */}

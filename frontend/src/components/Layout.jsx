@@ -4,13 +4,15 @@ import {
   Activity, Router as RouterIcon, LogOut, Satellite,
   ScrollText, Settings, FileCode, Shield, Terminal,
   RefreshCw, UserCog, Cog, Ticket, ChevronDown, UserCheck,
+  HeartPulse, Globe,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
 import { useSelectedRouter } from '../contexts/RouterContext';
-import { apiStats, apiSettings } from '../api/client';
+import { apiStats, apiSettings, apiEventsSummary } from '../api/client';
 import clsx from 'clsx';
 import { useEffect, useMemo, useState } from 'react';
+import { useLang, useT, LANG_LABELS } from '../i18n';
 
 // ============================================================
 // Sidebar groups — each group collapses independently. A group
@@ -18,43 +20,53 @@ import { useEffect, useMemo, useState } from 'react';
 // so the user always sees where they are. Everything else stays
 // tucked away to keep the sidebar quiet.
 // ============================================================
+// Group structure is fully translated via i18n keys. We keep the
+// icon/route here and look up the label at render time so language
+// changes are instant without re-mounting the sidebar.
 const GROUPS = [
   {
     key: 'customers',
-    label: 'Customers',
+    label: 'nav.customers',
     items: [
-      { to: '/',                   label: 'Overview',         icon: LayoutDashboard, end: true },
-      { to: '/orders',             label: 'Orders',           icon: Inbox, badge: 'pending' },
-      { to: '/customers',          label: 'Customers',        icon: Users },
-      { to: '/customer-accounts',  label: 'Portal accounts',  icon: UserCheck },
-      { to: '/subscriptions',      label: 'Subscriptions',    icon: Activity },
-      { to: '/vouchers',           label: 'Vouchers',         icon: Ticket },
+      { to: '/',                   label: 'nav.overview',       icon: LayoutDashboard, end: true },
+      { to: '/orders',             label: 'nav.orders',         icon: Inbox, badge: 'pending' },
+      { to: '/customers',          label: 'nav.customersPage',  icon: Users },
+      { to: '/customer-accounts',  label: 'nav.portalAccounts', icon: UserCheck },
+      { to: '/subscriptions',      label: 'nav.subscriptions',  icon: Activity },
+      { to: '/vouchers',           label: 'nav.vouchers',       icon: Ticket },
     ],
   },
   {
     key: 'network',
-    label: 'Network',
+    label: 'nav.network',
     items: [
-      { to: '/monitoring', label: 'Live Sessions', icon: Radio },
-      { to: '/packages',   label: 'Packages',      icon: Package },
-      { to: '/routers',    label: 'Routers',       icon: RouterIcon },
-      { to: '/configs',    label: 'Configs',       icon: FileCode },
-      { to: '/vpn',        label: 'VPN',           icon: Shield },
-      { to: '/scripts',    label: 'Scripts',       icon: Terminal },
-      { to: '/updates',    label: 'Updates',       icon: RefreshCw },
+      { to: '/health',     label: 'nav.health',     icon: HeartPulse, badge: 'health' },
+      { to: '/monitoring', label: 'Live Sessions',  icon: Radio },
+      { to: '/packages',   label: 'nav.packages',   icon: Package },
+      { to: '/routers',    label: 'nav.routers',    icon: RouterIcon },
+      { to: '/configs',    label: 'nav.configs',    icon: FileCode },
+      { to: '/vpn',        label: 'VPN',            icon: Shield },
+      { to: '/scripts',    label: 'Scripts',        icon: Terminal },
+      { to: '/updates',    label: 'Updates',        icon: RefreshCw },
     ],
   },
   {
     key: 'admin',
-    label: 'Admin',
+    label: 'nav.admin',
     items: [
-      { to: '/admins',   label: 'Admin users', icon: UserCog },
-      { to: '/system',   label: 'System',      icon: Cog },
-      { to: '/activity', label: 'Activity',    icon: ScrollText },
-      { to: '/settings', label: 'Profile',     icon: Settings },
+      { to: '/admins',   label: 'nav.users',    icon: UserCog },
+      { to: '/system',   label: 'nav.settings', icon: Cog },
+      { to: '/activity', label: 'nav.audit',    icon: ScrollText },
+      { to: '/settings', label: 'Profile',      icon: Settings },
     ],
   },
 ];
+
+// Keys that already live under `nav.` in the catalogue get
+// translated; anything else falls back to the raw label.
+function tr(t, key) {
+  return key.startsWith('nav.') || key.startsWith('common.') ? t(key) : key;
+}
 
 export default function Layout() {
   const { admin, logout } = useAuth();
@@ -64,8 +76,16 @@ export default function Layout() {
     queryFn: () => apiStats(routerId),
     refetchInterval: 30_000,
   });
+  const { data: eventsSum } = useQuery({
+    queryKey: ['events-summary'],
+    queryFn: apiEventsSummary,
+    refetchInterval: 60_000,
+  });
+  const t = useT();
+  const { lang, setLang, available } = useLang();
 
   const pendingCount = stats?.pendingOrders ?? 0;
+  const healthCount  = (eventsSum?.critical ?? 0) + (eventsSum?.error ?? 0) + (eventsSum?.warning ?? 0);
   const { pathname } = useLocation();
 
   // Figure out which group the active route lives in — that one
@@ -193,7 +213,7 @@ export default function Layout() {
                   onClick={() => toggleGroup(g.key)}
                   className="w-full flex items-center justify-between px-3 py-1.5 text-mono text-[10px] text-text-mute uppercase tracking-[0.2em] hover:text-text transition-colors"
                 >
-                  <span>{g.label}</span>
+                  <span>{tr(t, g.label)}</span>
                   <ChevronDown
                     size={12}
                     className={clsx('transition-transform', isOpen ? 'rotate-0' : '-rotate-90')}
@@ -202,7 +222,13 @@ export default function Layout() {
                 {isOpen && (
                   <div className="mt-1 space-y-0.5">
                     {g.items.map((item) => {
-                      const showBadge = item.badge === 'pending' && pendingCount > 0;
+                      const badgeCount =
+                        item.badge === 'pending' ? pendingCount :
+                        item.badge === 'health'  ? healthCount  : 0;
+                      const badgeColor =
+                        item.badge === 'health' && (eventsSum?.critical || eventsSum?.error)
+                          ? 'bg-red text-white'
+                          : 'bg-amber text-black';
                       return (
                         <NavLink
                           key={item.to}
@@ -224,10 +250,10 @@ export default function Layout() {
                                 <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-5 bg-amber shadow-glow-amber" />
                               )}
                               <item.icon size={15} strokeWidth={1.5} />
-                              <span className="flex-1">{item.label}</span>
-                              {showBadge && (
-                                <span className="text-mono text-[10px] bg-amber text-black px-1.5 py-px rounded-sm">
-                                  {pendingCount}
+                              <span className="flex-1">{tr(t, item.label)}</span>
+                              {badgeCount > 0 && (
+                                <span className={clsx('text-mono text-[10px] px-1.5 py-px rounded-sm', badgeColor)}>
+                                  {badgeCount}
                                 </span>
                               )}
                             </>
@@ -254,6 +280,19 @@ export default function Layout() {
                 {admin?.role}
               </div>
             </div>
+          </div>
+          <div className="mb-2 flex items-center gap-2 px-2 py-1 text-[11px] text-text-mute">
+            <Globe size={12} />
+            <span className="font-mono uppercase tracking-wider">{t('common.language')}</span>
+            <select
+              value={lang}
+              onChange={(e) => setLang(e.target.value)}
+              className="ml-auto bg-transparent border border-border-dim rounded-sm text-xs px-1 py-0.5"
+            >
+              {available.map((code) => (
+                <option key={code} value={code}>{LANG_LABELS[code] || code}</option>
+              ))}
+            </select>
           </div>
           <button
             onClick={logout}

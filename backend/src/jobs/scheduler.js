@@ -12,6 +12,8 @@ import { expireSubscription } from '../services/provisioning.js';
 import { getMikrotikClient } from '../mikrotik/client.js';
 import { getSetting } from '../services/settings.js';
 import notifier from '../services/notifier.js';
+import monitoring from '../services/monitoring.js';
+import health from '../services/health.js';
 import logger from '../utils/logger.js';
 
 async function retryUnsyncedSubs() {
@@ -299,6 +301,22 @@ export function startJobs() {
   cron.schedule('0 8 * * *',    () => sendExpiryReminders().catch((e) => logger.error({ e }, 'expiry reminder job')));
   // Overnight: drop snapshots older than the retention window.
   cron.schedule('30 3 * * *',   () => pruneUsageSnapshots());
+
+  // -------- Monitoring + health --------
+  // Every 5 min: poll all routers for CPU/RAM/iface/ping/neighbors.
+  cron.schedule('*/5 * * * *',  () => monitoring.pollAllRouters().catch((e) => logger.error({ e }, 'monitoring poll')));
+  // Every 5 min: run issue-detector rules against the fresh data.
+  cron.schedule('*/5 * * * *',  () => health.runHealthChecks().catch((e) => logger.error({ e }, 'health checks')));
+  // Once a day at 04:00: refresh static device info (firmware / license).
+  cron.schedule('0 4 * * *',    async () => {
+    try {
+      const routers = await db.query('SELECT id, name FROM mikrotik_routers WHERE is_active = 1');
+      for (const r of routers) await monitoring.refreshDeviceInfo(r);
+    } catch (e) { logger.error({ e }, 'device info refresh'); }
+  });
+  // Overnight: drop metrics older than the retention window.
+  cron.schedule('45 3 * * *',   () => monitoring.pruneMetrics());
+
   logger.info('cron jobs scheduled');
 }
 

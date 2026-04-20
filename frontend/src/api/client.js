@@ -244,6 +244,26 @@ export const apiRunExpiryReminders = () =>
 export const apiSubscriptionBandwidth = (id, days = 14) =>
   api.get(`/subscriptions/${id}/bandwidth`, { params: { days } }).then((r) => r.data.days);
 
+// ---------- Monitoring (per-router CPU/RAM/temp/SFP/ping/…) ----
+export const apiMonitorRouters       = () => api.get('/monitoring/routers').then((r) => r.data.routers);
+export const apiMonitorRouter        = (id) => api.get(`/monitoring/routers/${id}`).then((r) => r.data);
+export const apiMonitorHistory       = (id, hours = 24) =>
+  api.get(`/monitoring/routers/${id}/history`, { params: { hours } }).then((r) => r.data.rows);
+export const apiMonitorPingHistory   = (id, hours = 24) =>
+  api.get(`/monitoring/routers/${id}/ping-history`, { params: { hours } }).then((r) => r.data.rows);
+export const apiMonitorAddPingTarget = (id, data) =>
+  api.post(`/monitoring/routers/${id}/ping-targets`, data).then((r) => r.data);
+export const apiMonitorDelPingTarget = (tid) =>
+  api.delete(`/monitoring/ping-targets/${tid}`).then((r) => r.data);
+export const apiMonitorPollNow       = () => api.post('/monitoring/poll-now').then((r) => r.data);
+
+// ---------- Events / alerts ------------------------------------
+export const apiEvents          = (status = 'open') =>
+  api.get('/monitoring/events', { params: { status } }).then((r) => r.data.events);
+export const apiEventsSummary   = () => api.get('/monitoring/events/summary').then((r) => r.data);
+export const apiResolveEvent    = (id) => api.post(`/monitoring/events/${id}/resolve`).then((r) => r.data);
+export const apiRunHealthChecks = () => api.post('/monitoring/events/run-checks').then((r) => r.data);
+
 // ---------- Notifications ----------
 export const apiNotifyChannels = () =>
   api.get('/notify/channels').then((r) => r.data.channels);

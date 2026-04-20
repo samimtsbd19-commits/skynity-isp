@@ -3,12 +3,14 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
   Wallet, Activity, Inbox, Clock, Signal, Wifi, AlertTriangle,
+  AlertOctagon, CheckCircle2, HeartPulse, ChevronRight,
 } from 'lucide-react';
 import {
   AreaChart, Area, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
 import {
   apiStats, apiStatsRevenue, apiOrders, apiMikrotikInfo, apiMikrotikActive,
+  apiEventsSummary, apiEvents,
 } from '../api/client';
 import { useSelectedRouter } from '../contexts/RouterContext';
 import { StatCard, StatusPill, EmptyState } from '../components/primitives';
@@ -76,6 +78,7 @@ export default function Dashboard() {
       />
 
       <div className="p-8 space-y-8">
+        <HealthBanner />
         {/* STAT GRID */}
         <section>
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -364,6 +367,84 @@ function Row({ label, value }) {
     <div className="flex items-center justify-between text-xs">
       <dt className="text-text-mute uppercase tracking-wider">{label}</dt>
       <dd className="text-text">{value ?? '—'}</dd>
+    </div>
+  );
+}
+
+// ============================================================
+// System-wide health banner at the top of the dashboard.
+// Shows a green "all clear" bar when nothing's wrong, or a
+// compact list of the top 3 critical/error issues otherwise.
+// ============================================================
+function HealthBanner() {
+  const { data: summary } = useQuery({
+    queryKey: ['events-summary'],
+    queryFn: apiEventsSummary,
+    refetchInterval: 30_000,
+  });
+  const topBad = (summary?.critical ?? 0) + (summary?.error ?? 0);
+  const { data: events } = useQuery({
+    queryKey: ['events', 'open', 'dash'],
+    queryFn: () => apiEvents('open'),
+    refetchInterval: 30_000,
+    enabled: topBad > 0,
+  });
+
+  if (!summary) return null;
+
+  if (summary.total === 0) {
+    return (
+      <div className="panel p-4 border-green/40 bg-green/5 flex items-center gap-3">
+        <CheckCircle2 size={18} className="text-green" />
+        <div className="flex-1">
+          <div className="text-sm">All systems healthy.</div>
+          <div className="text-[11px] text-text-mute">
+            No open issues on VPS, routers, or network.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const top = (events || []).slice(0, 3);
+  return (
+    <div className={`panel p-4 ${topBad ? 'border-red/40 bg-red/5' : 'border-amber/40 bg-amber/5'}`}>
+      <div className="flex items-center gap-3 mb-3">
+        {topBad > 0
+          ? <AlertOctagon size={18} className="text-red" />
+          : <AlertTriangle size={18} className="text-amber" />}
+        <div className="flex-1">
+          <div className="text-sm">
+            {summary.critical ? `${summary.critical} critical · ` : ''}
+            {summary.error    ? `${summary.error} errors · `      : ''}
+            {summary.warning  ? `${summary.warning} warnings`     : ''}
+          </div>
+          <div className="text-[11px] text-text-mute">Tap an issue to see the suggested fix.</div>
+        </div>
+        <Link to="/health" className="btn btn-ghost text-xs">
+          <HeartPulse size={12} /> View all <ChevronRight size={12} />
+        </Link>
+      </div>
+      {top.length > 0 && (
+        <ul className="space-y-1">
+          {top.map((e) => (
+            <li key={e.id}>
+              <Link
+                to="/health"
+                className="flex items-center gap-2 text-xs hover:bg-surface2/50 rounded-sm px-2 py-1"
+              >
+                <span className={
+                  e.severity === 'critical' || e.severity === 'error'
+                    ? 'led led-off'
+                    : 'led led-warn'
+                } />
+                <span className="flex-1 truncate">{e.title}</span>
+                <span className="tag tag-dim text-[10px]">{e.source}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
