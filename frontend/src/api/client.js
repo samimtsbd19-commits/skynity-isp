@@ -265,6 +265,22 @@ export const apiMonitorTopUsers      = (id, { hours = 24, limit = 10 } = {}) =>
 export const apiMonitorSubUsage      = (subId, hours = 24) =>
   api.get(`/monitoring/subscriptions/${subId}/usage-history`, { params: { hours } }).then((r) => r.data);
 
+// ---------- Suspensions & static IP ----------------------------
+export const apiSuspensions              = () =>
+  api.get('/suspensions').then((r) => r.data.suspensions);
+export const apiSuspensionsByCustomer    = (customerId) =>
+  api.get(`/suspensions/by-customer/${customerId}`).then((r) => r.data.suspensions);
+export const apiSuspensionApply          = (data) =>
+  api.post('/suspensions', data).then((r) => r.data);
+export const apiSuspensionLift           = (id, data) =>
+  api.post(`/suspensions/${id}/lift`, data || {}).then((r) => r.data);
+export const apiSuspensionLiftAll        = (customerId, data) =>
+  api.post(`/suspensions/by-customer/${customerId}/lift-all`, data || {}).then((r) => r.data);
+export const apiStaticIpAssign           = (subscriptionId, ip) =>
+  api.post(`/suspensions/subscriptions/${subscriptionId}/static-ip`, { ip }).then((r) => r.data);
+export const apiStaticIpClear            = (subscriptionId) =>
+  api.delete(`/suspensions/subscriptions/${subscriptionId}/static-ip`).then((r) => r.data);
+
 // ---------- Events / alerts ------------------------------------
 export const apiEvents          = (status = 'open') =>
   api.get('/monitoring/events', { params: { status } }).then((r) => r.data.events);

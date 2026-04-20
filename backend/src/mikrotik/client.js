@@ -127,11 +127,14 @@ export class MikrotikClient {
     return all.find((s) => s.name === name) || null;
   }
 
-  async createPppSecret({ name, password, profile, service = 'pppoe', comment, callerId }) {
+  async createPppSecret({ name, password, profile, service = 'pppoe', comment, callerId, remoteAddress }) {
     const body = { name, password, profile, service, comment };
     // RouterOS PPP MAC-binding: `caller-id` is checked against the
     // pppoe session's source MAC. Setting this denies any other device.
     if (callerId) body['caller-id'] = callerId;
+    // Static IP binding: RouterOS hands exactly this address to the
+    // PPPoE session instead of pulling one from the profile's pool.
+    if (remoteAddress) body['remote-address'] = remoteAddress;
     return this.put('/ppp/secret', body);
   }
 

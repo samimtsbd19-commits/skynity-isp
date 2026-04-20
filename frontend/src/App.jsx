@@ -25,6 +25,7 @@ import Vouchers from './pages/Vouchers';
 import CustomerAccounts from './pages/CustomerAccounts';
 import Health from './pages/Health';
 import Offers from './pages/Offers';
+import Suspensions from './pages/Suspensions';
 import PublicPortal from './pages/PublicPortal';
 
 const qc = new QueryClient({
@@ -75,6 +76,7 @@ export default function App() {
               <Route path="packages" element={<Packages />} />
               <Route path="vouchers" element={<Vouchers />} />
               <Route path="offers" element={<Offers />} />
+              <Route path="suspensions" element={<Suspensions />} />
               <Route path="routers" element={<Routers />} />
               <Route path="configs" element={<Configs />} />
               <Route path="vpn" element={<Vpn />} />

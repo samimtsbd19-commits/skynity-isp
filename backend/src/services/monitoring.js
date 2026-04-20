@@ -96,6 +96,10 @@ export async function sampleRouter(router) {
       ]
     );
 
+    // Feed the CPU guard — may open/close a "router under load"
+    // event and disable expensive polls for this router.
+    await updateGuard(router, int(res['cpu-load'])).catch(() => null);
+
     return { ok: true, cpu: int(res['cpu-load']), activePpp: pppActive.length };
   } catch (err) {
     logger.warn({ err: err.message, router_id: router.id }, 'sampleRouter failed');
@@ -108,6 +112,11 @@ export async function sampleRouter(router) {
 // ============================================================
 export async function sampleInterfaces(router) {
   const mt = await getMikrotikClient(router.id);
+  // Per-interface SFP monitor calls are the most expensive poll
+  // we do. If the CPU guard is active, skip them until CPU recovers.
+  const skipSfp = await isGuardActive(router.id)
+    && (await getSetting('guard.pause_sfp_poll')) !== false
+    && (await getSetting('guard.pause_sfp_poll')) !== 'false';
   try {
     const ifaces = await mt.interfaces().catch(() => []);
     for (const i of ifaces) {
@@ -115,7 +124,7 @@ export async function sampleInterfaces(router) {
       const linkOk    = i.running === 'true' ? 1 : i.running === 'false' ? 0 : null;
 
       let sfp = null;
-      if (isEther && linkOk) {
+      if (isEther && linkOk && !skipSfp) {
         sfp = await mt.ethernetMonitor(i.name).catch(() => null);
       }
 
@@ -229,6 +238,115 @@ export async function sampleNeighbors(router) {
 }
 
 // ============================================================
+// CPU / load guard
+// ------------------------------------------------------------
+// Keeps one row per router in `router_guard_state`. Every time
+// we get a new CPU sample we:
+//
+//   * Increment `high_ticks` if CPU >= `guard.cpu_crit`.
+//   * If high_ticks * interval_min >= `guard.cpu_crit_minutes`
+//     and the guard isn't already active → activate it and open
+//     a critical `system_events` row.
+//   * If the guard IS active and CPU <= `guard.resume_cpu` →
+//     lift the guard and resolve the event.
+//
+// Other monitoring functions call `isGuardActive(routerId)` to
+// decide whether to skip expensive polls (queues / SFP).
+// ============================================================
+export async function isGuardActive(routerId) {
+  const row = await db.queryOne(
+    'SELECT active FROM router_guard_state WHERE router_id = ?',
+    [routerId]
+  );
+  return !!(row && row.active);
+}
+
+async function updateGuard(router, cpu) {
+  if (cpu == null) return;
+  const [crit, resume, minutes, interval] = await Promise.all([
+    getSetting('guard.cpu_crit').then((v) => Number(v) || 85),
+    getSetting('guard.resume_cpu').then((v) => Number(v) || 65),
+    getSetting('guard.cpu_crit_minutes').then((v) => Number(v) || 15),
+    getSetting('monitoring.interval_min').then((v) => Number(v) || 5),
+  ]);
+
+  // Make sure we have a row.
+  await db.query(
+    `INSERT INTO router_guard_state (router_id, active, high_ticks, last_cpu)
+     VALUES (?, 0, 0, ?)
+     ON DUPLICATE KEY UPDATE last_cpu = VALUES(last_cpu)`,
+    [router.id, cpu]
+  );
+  const st = await db.queryOne(
+    'SELECT * FROM router_guard_state WHERE router_id = ?', [router.id]
+  );
+
+  const requiredTicks = Math.max(1, Math.ceil(minutes / Math.max(1, interval)));
+
+  if (cpu >= crit) {
+    const ticks = (st?.high_ticks || 0) + 1;
+    await db.query(
+      `UPDATE router_guard_state SET high_ticks = ?, last_cpu = ? WHERE router_id = ?`,
+      [ticks, cpu, router.id]
+    );
+    if (!st.active && ticks >= requiredTicks) {
+      await db.query(
+        `UPDATE router_guard_state
+            SET active = 1, reason = ?, since = NOW(), lifted_at = NULL
+          WHERE router_id = ?`,
+        [`CPU sustained ≥ ${crit}% for ${minutes} min`, router.id]
+      );
+      // Open a critical event in the issue-detector feed.
+      await db.query(
+        `INSERT INTO system_events (code, severity, source, source_ref, title, message, suggestion)
+         VALUES ('router_cpu_guard', 'critical', 'router', ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           last_seen = NOW(),
+           occurrences = occurrences + 1,
+           resolved_at = NULL`,
+        [
+          String(router.id),
+          `Router ${router.name || router.host} — CPU guard activated`,
+          `CPU has been ≥ ${crit}% for ${minutes} min. Expensive polls (queues / SFP) are now paused for this router.`,
+          'Check /tool/profile on the router for the hot process. Common culprits: firewall connection-tracking, queue tree, excessive logging. Consider enabling FastTrack or upgrading the router.',
+        ]
+      );
+      logger.warn({ router_id: router.id, cpu }, 'CPU guard activated');
+    }
+  } else if (cpu <= resume) {
+    if (st?.active) {
+      await db.query(
+        `UPDATE router_guard_state
+            SET active = 0, high_ticks = 0, lifted_at = NOW()
+          WHERE router_id = ?`,
+        [router.id]
+      );
+      await db.query(
+        `UPDATE system_events
+            SET resolved_at = NOW()
+          WHERE code = 'router_cpu_guard' AND source_ref = ? AND resolved_at IS NULL`,
+        [String(router.id)]
+      );
+      logger.info({ router_id: router.id, cpu }, 'CPU guard lifted');
+    } else {
+      // Decay the tick counter when CPU recovers without fully activating.
+      await db.query(
+        `UPDATE router_guard_state
+            SET high_ticks = GREATEST(high_ticks - 1, 0), last_cpu = ?
+          WHERE router_id = ?`,
+        [cpu, router.id]
+      );
+    }
+  } else {
+    // CPU in the neutral band — just update last_cpu.
+    await db.query(
+      `UPDATE router_guard_state SET last_cpu = ? WHERE router_id = ?`,
+      [cpu, router.id]
+    );
+  }
+}
+
+// ============================================================
 // Sample every queue (simple + tree) for bandwidth & drops.
 // ------------------------------------------------------------
 // RouterOS returns cumulative byte counters for each queue;
@@ -239,6 +357,15 @@ export async function sampleNeighbors(router) {
 export async function sampleQueues(router) {
   const enabled = await getSetting('monitoring.queue_poll_enabled');
   if (enabled === false || enabled === 'false') return { ok: true, skipped: 'disabled' };
+
+  // Guard: queue polling is expensive on busy routers. Skip it
+  // while the CPU guard is active for this router.
+  if (await isGuardActive(router.id)) {
+    const pauseQueue = await getSetting('guard.pause_queue_poll');
+    if (pauseQueue !== false && pauseQueue !== 'false') {
+      return { ok: true, skipped: 'cpu-guard' };
+    }
+  }
 
   const mt = await getMikrotikClient(router.id);
   const limit = Math.max(1, Number(await getSetting('monitoring.queue_poll_limit')) || 50);

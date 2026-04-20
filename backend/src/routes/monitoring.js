@@ -48,12 +48,13 @@ router.get('/routers/:id', async (req, res) => {
     const router_ = await db.queryOne('SELECT * FROM mikrotik_routers WHERE id = ?', [id]);
     if (!router_) return res.status(404).json({ error: 'router not found' });
 
-    const [device, latest, neighbors, interfaces, pingTargets] = await Promise.all([
+    const [device, latest, neighbors, interfaces, pingTargets, guard] = await Promise.all([
       db.queryOne('SELECT * FROM router_device_info WHERE router_id = ?', [id]),
       db.queryOne('SELECT * FROM router_metrics WHERE router_id = ? ORDER BY id DESC LIMIT 1', [id]),
       db.query(`SELECT * FROM router_neighbors WHERE router_id = ? ORDER BY last_seen_at DESC`, [id]),
       latestInterfaceRow(id),
       db.query(`SELECT * FROM router_ping_targets WHERE router_id = ? ORDER BY id ASC`, [id]),
+      db.queryOne('SELECT * FROM router_guard_state WHERE router_id = ?', [id]),
     ]);
 
     const pings = [];
@@ -65,7 +66,7 @@ router.get('/routers/:id', async (req, res) => {
       pings.push({ target: t, latest: last });
     }
 
-    res.json({ router: router_, device, latest, neighbors, interfaces, pings });
+    res.json({ router: router_, device, latest, neighbors, interfaces, pings, guard });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

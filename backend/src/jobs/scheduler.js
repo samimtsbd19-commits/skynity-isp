@@ -14,6 +14,7 @@ import { getSetting } from '../services/settings.js';
 import notifier from '../services/notifier.js';
 import monitoring from '../services/monitoring.js';
 import health from '../services/health.js';
+import suspensions from '../services/suspensions.js';
 import logger from '../utils/logger.js';
 
 async function retryUnsyncedSubs() {
@@ -316,6 +317,11 @@ export function startJobs() {
   });
   // Overnight: drop metrics older than the retention window.
   cron.schedule('45 3 * * *',   () => monitoring.pruneMetrics());
+
+  // Every minute: lift any temporary suspensions whose timer has
+  // elapsed. Cheap query — no routers hit unless there's work.
+  cron.schedule('* * * * *',    () => suspensions.liftExpired()
+    .catch((e) => logger.error({ e }, 'suspension auto-lift')));
 
   logger.info('cron jobs scheduled');
 }

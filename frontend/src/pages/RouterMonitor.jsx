@@ -26,7 +26,7 @@ import {
 import {
   Server, Cpu, MemoryStick, Thermometer, Activity, Signal,
   RefreshCw, Plus, Trash2, Gauge, Wifi,
-  ChevronRight, Users, Radio, Network,
+  ChevronRight, Users, Radio, Network, ShieldAlert,
 } from 'lucide-react';
 import {
   apiMonitorRouters, apiMonitorRouter, apiMonitorHistory,
@@ -202,6 +202,7 @@ function RouterBody({ routerId, hours }) {
 
   return (
     <>
+      {d.guard?.active ? <GuardBanner guard={d.guard} /> : null}
       <DeviceInfoStrip router={d.router} device={d.device} latest={latest} />
       <ResourceHistory rows={history.data || []} latest={latest} />
       <InterfacesSection
@@ -218,6 +219,34 @@ function RouterBody({ routerId, hours }) {
       <TopUsersSection routerId={routerId} hours={hours} />
       <NeighborsSection neighbors={d.neighbors || []} />
     </>
+  );
+}
+
+// ============================================================
+// CPU guard banner
+// ------------------------------------------------------------
+// Shown when the monitor has paused expensive polls (queues /
+// SFP) to relieve an overloaded router. Lifts automatically
+// when CPU recovers under the resume threshold.
+// ============================================================
+function GuardBanner({ guard }) {
+  const since = guard.since ? new Date(guard.since) : null;
+  return (
+    <div className="panel p-4 mb-4 flex items-start gap-3"
+         style={{ background: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.4)' }}>
+      <ShieldAlert size={22} className="text-red mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="tag tag-red">CPU GUARD ACTIVE</span>
+          <span className="text-sm">{guard.reason || 'Expensive polls paused'}</span>
+        </div>
+        <div className="text-[11px] text-text-dim font-mono mt-1">
+          Last CPU: <b>{guard.last_cpu}%</b>
+          {since && ` · since ${since.toLocaleTimeString()}`}
+          {' · queue & SFP monitors are paused until CPU recovers.'}
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -4,12 +4,12 @@ import {
   Activity, Router as RouterIcon, LogOut, Satellite,
   ScrollText, Settings, FileCode, Shield, Terminal,
   RefreshCw, UserCog, Cog, Ticket, ChevronDown, UserCheck,
-  HeartPulse, Globe, Megaphone, Gauge,
+  HeartPulse, Globe, Megaphone, Gauge, Ban,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
 import { useSelectedRouter } from '../contexts/RouterContext';
-import { apiStats, apiSettings, apiEventsSummary } from '../api/client';
+import { apiStats, apiSettings, apiEventsSummary, apiSuspensions } from '../api/client';
 import clsx from 'clsx';
 import { useEffect, useMemo, useState } from 'react';
 import { useLang, useT, LANG_LABELS } from '../i18n';
@@ -35,6 +35,7 @@ const GROUPS = [
       { to: '/subscriptions',      label: 'nav.subscriptions',  icon: Activity },
       { to: '/vouchers',           label: 'nav.vouchers',       icon: Ticket },
       { to: '/offers',             label: 'nav.offers',         icon: Megaphone },
+      { to: '/suspensions',        label: 'nav.suspensions',    icon: Ban, badge: 'suspensions' },
     ],
   },
   {
@@ -83,11 +84,17 @@ export default function Layout() {
     queryFn: apiEventsSummary,
     refetchInterval: 60_000,
   });
+  const { data: suspList } = useQuery({
+    queryKey: ['suspensions'],
+    queryFn: apiSuspensions,
+    refetchInterval: 120_000,
+  });
   const t = useT();
   const { lang, setLang, available } = useLang();
 
   const pendingCount = stats?.pendingOrders ?? 0;
   const healthCount  = (eventsSum?.critical ?? 0) + (eventsSum?.error ?? 0) + (eventsSum?.warning ?? 0);
+  const suspCount    = suspList?.length ?? 0;
   const { pathname } = useLocation();
 
   // Figure out which group the active route lives in — that one
@@ -225,8 +232,9 @@ export default function Layout() {
                   <div className="mt-1 space-y-0.5">
                     {g.items.map((item) => {
                       const badgeCount =
-                        item.badge === 'pending' ? pendingCount :
-                        item.badge === 'health'  ? healthCount  : 0;
+                        item.badge === 'pending'     ? pendingCount :
+                        item.badge === 'health'      ? healthCount  :
+                        item.badge === 'suspensions' ? suspCount    : 0;
                       const badgeColor =
                         item.badge === 'health' && (eventsSum?.critical || eventsSum?.error)
                           ? 'bg-red text-white'
