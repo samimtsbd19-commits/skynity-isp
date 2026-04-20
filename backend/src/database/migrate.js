@@ -28,11 +28,16 @@ async function run() {
     }
     logger.info({ file }, 'applying migration');
     const sql = await fs.readFile(path.join(dir, file), 'utf8');
-    // split by semicolons but keep it simple — our migrations are hand-crafted
+    // Split by semicolons at end-of-line; keep statements that have real SQL
+    // after stripping leading "-- ..." comment lines (SQL like
+    //   -- ----- Admins -----
+    //   CREATE TABLE admins ...
+    // must not be skipped).
     const statements = sql
       .split(/;\s*$/m)
       .map((s) => s.trim())
-      .filter((s) => s && !s.startsWith('--'));
+      .map((s) => s.replace(/^(?:\s*--[^\n]*\n?)+/, '').trim())
+      .filter((s) => s.length > 0);
     for (const stmt of statements) {
       try {
         await pool.query(stmt);
