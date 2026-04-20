@@ -14,6 +14,12 @@ import Packages from './pages/Packages';
 import Routers from './pages/Routers';
 import Activity from './pages/Activity';
 import Settings from './pages/Settings';
+import Configs from './pages/Configs';
+import Vpn from './pages/Vpn';
+import Scripts from './pages/Scripts';
+import Updates from './pages/Updates';
+import SystemSettings from './pages/SystemSettings';
+import Admins from './pages/Admins';
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -56,6 +62,12 @@ export default function App() {
               <Route path="monitoring" element={<Monitoring />} />
               <Route path="packages" element={<Packages />} />
               <Route path="routers" element={<Routers />} />
+              <Route path="configs" element={<Configs />} />
+              <Route path="vpn" element={<Vpn />} />
+              <Route path="scripts" element={<Scripts />} />
+              <Route path="updates" element={<Updates />} />
+              <Route path="admins" element={<Admins />} />
+              <Route path="system" element={<SystemSettings />} />
               <Route path="activity" element={<Activity />} />
               <Route path="settings" element={<Settings />} />
             </Route>

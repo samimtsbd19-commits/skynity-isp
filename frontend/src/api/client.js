@@ -78,3 +78,94 @@ export const apiMikrotikQueues = (routerId) =>
   api.get('/mikrotik/queues', { params: routerParams(routerId) }).then((r) => r.data);
 export const apiMikrotikNeighbors = (routerId) =>
   api.get('/mikrotik/neighbors', { params: routerParams(routerId) }).then((r) => r.data);
+
+// ------------------------------------------------------------
+// Phase 4 APIs: config files, VPN, scripts, updates, settings,
+// admin users, router CRUD
+// ------------------------------------------------------------
+
+// ---------- Config files ----------
+export const apiConfigs = () => api.get('/configs').then((r) => r.data.configs);
+export const apiConfigUpload = (formData, onProgress) =>
+  api.post('/configs', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: onProgress,
+  }).then((r) => r.data);
+export const apiConfigDelete = (id) => api.delete(`/configs/${id}`).then((r) => r.data);
+export const apiConfigPush = (id, router_id, run_import = true) =>
+  api.post(`/configs/${id}/push`, { router_id, run_import }).then((r) => r.data);
+export const apiConfigPushes = (id) =>
+  api.get(`/configs/${id}/pushes`).then((r) => r.data.pushes);
+export const apiConfigDownloadUrl = (id) => `/api/configs/${id}/raw`;
+
+// ---------- VPN ----------
+export const apiVpnTunnels = (params = {}) =>
+  api.get('/vpn/tunnels', { params }).then((r) => r.data.tunnels);
+export const apiVpnTunnel = (id) => api.get(`/vpn/tunnels/${id}`).then((r) => r.data);
+export const apiVpnTunnelCreate = (data) =>
+  api.post('/vpn/tunnels', data).then((r) => r.data);
+export const apiVpnTunnelSync = (id) =>
+  api.post(`/vpn/tunnels/${id}/sync`).then((r) => r.data);
+export const apiVpnTunnelToggle = (id, enabled) =>
+  api.post(`/vpn/tunnels/${id}/toggle`, { enabled }).then((r) => r.data);
+export const apiVpnTunnelDelete = (id) =>
+  api.delete(`/vpn/tunnels/${id}`).then((r) => r.data);
+export const apiVpnPeers = (tunnelId) =>
+  api.get(`/vpn/tunnels/${tunnelId}/peers`).then((r) => r.data.peers);
+export const apiVpnPeerCreate = (tunnelId, data) =>
+  api.post(`/vpn/tunnels/${tunnelId}/peers`, data).then((r) => r.data);
+export const apiVpnPeerSync = (id) =>
+  api.post(`/vpn/peers/${id}/sync`).then((r) => r.data);
+export const apiVpnPeerDelete = (id) =>
+  api.delete(`/vpn/peers/${id}`).then((r) => r.data);
+export const apiVpnPeerConfigUrl = (id) => `/api/vpn/peers/${id}/config`;
+
+// ---------- Scripts ----------
+export const apiScripts = () => api.get('/scripts').then((r) => r.data.scripts);
+export const apiScript = (id) => api.get(`/scripts/${id}`).then((r) => r.data);
+export const apiScriptCreate = (data) => api.post('/scripts', data).then((r) => r.data);
+export const apiScriptUpdate = (id, patch) => api.patch(`/scripts/${id}`, patch).then((r) => r.data);
+export const apiScriptDelete = (id) => api.delete(`/scripts/${id}`).then((r) => r.data);
+export const apiScriptExecute = (id, router_id) =>
+  api.post(`/scripts/${id}/execute`, { router_id }).then((r) => r.data);
+export const apiScriptInlineExecute = (router_id, source, name) =>
+  api.post('/scripts/inline/execute', { router_id, source, name }).then((r) => r.data);
+export const apiScriptExecutions = (params = {}) =>
+  api.get('/scripts/executions/history', { params }).then((r) => r.data.executions);
+
+// ---------- Updates ----------
+export const apiUpdateCheck = (router_id, channel) =>
+  api.post('/updates/check', { router_id, channel }).then((r) => r.data);
+export const apiUpdateDownload = (router_id) =>
+  api.post('/updates/download', { router_id }).then((r) => r.data);
+export const apiUpdateInstall = (router_id) =>
+  api.post('/updates/install', { router_id }).then((r) => r.data);
+export const apiRouterReboot = (router_id) =>
+  api.post('/updates/reboot', { router_id }).then((r) => r.data);
+export const apiRouterPackages = (router_id) =>
+  api.get('/updates/packages', { params: { router_id } }).then((r) => r.data.packages);
+export const apiRouterPackageToggle = (router_id, package_id, enabled) =>
+  api.post('/updates/packages/toggle', { router_id, package_id, enabled }).then((r) => r.data);
+export const apiUpdateTasks = (router_id) =>
+  api.get('/updates/tasks', { params: { router_id } }).then((r) => r.data.tasks);
+
+// ---------- System Settings ----------
+export const apiSettings = () => api.get('/settings').then((r) => r.data.settings);
+export const apiSettingUpdate = (key, payload) =>
+  api.put(`/settings/${encodeURIComponent(key)}`, payload).then((r) => r.data);
+export const apiSettingsBulk = (settings) =>
+  api.post('/settings/bulk', { settings }).then((r) => r.data);
+
+// ---------- Admin users ----------
+export const apiAdmins = () => api.get('/admins').then((r) => r.data.admins);
+export const apiAdminCreate = (data) => api.post('/admins', data).then((r) => r.data);
+export const apiAdminUpdate = (id, patch) => api.patch(`/admins/${id}`, patch).then((r) => r.data);
+export const apiAdminDelete = (id) => api.delete(`/admins/${id}`).then((r) => r.data);
+
+// ---------- Router CRUD ----------
+export const apiRouterCreate = (data) => api.post('/routers-admin', data).then((r) => r.data);
+export const apiRouterUpdate = (id, patch) => api.patch(`/routers-admin/${id}`, patch).then((r) => r.data);
+export const apiRouterDelete = (id) => api.delete(`/routers-admin/${id}`).then((r) => r.data);
+export const apiRouterTest = (id) => api.post(`/routers-admin/${id}/test`).then((r) => r.data);
+export const apiRouterTestConnection = (data) =>
+  api.post('/routers-admin/test-connection', data).then((r) => r.data);
