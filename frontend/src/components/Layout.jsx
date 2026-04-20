@@ -2,7 +2,8 @@ import { NavLink, Outlet } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Inbox, Package, Radio,
   Activity, Router as RouterIcon, LogOut, Satellite,
-  ScrollText, Settings,
+  ScrollText, Settings, FileCode, Shield, Terminal,
+  RefreshCw, UserCog, Cog,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
@@ -18,8 +19,14 @@ const nav = [
   { to: '/monitoring', label: 'Live Sessions', icon: Radio },
   { to: '/packages', label: 'Packages', icon: Package },
   { to: '/routers', label: 'Routers', icon: RouterIcon },
+  { to: '/configs', label: 'Configs', icon: FileCode },
+  { to: '/vpn', label: 'VPN', icon: Shield },
+  { to: '/scripts', label: 'Scripts', icon: Terminal },
+  { to: '/updates', label: 'Updates', icon: RefreshCw },
+  { to: '/admins', label: 'Admin users', icon: UserCog },
+  { to: '/system', label: 'System', icon: Cog },
   { to: '/activity', label: 'Activity', icon: ScrollText },
-  { to: '/settings', label: 'Settings', icon: Settings },
+  { to: '/settings', label: 'Profile', icon: Settings },
 ];
 
 export default function Layout() {

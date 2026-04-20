@@ -4,8 +4,24 @@ import db from '../database/pool.js';
 import { signAdminToken, requireAdmin, requireRole } from '../middleware/auth.js';
 import { approveOrderAndProvision, rejectOrder } from '../services/provisioning.js';
 import { getMikrotikClient } from '../mikrotik/client.js';
+import configsRouter from './configs.js';
+import vpnRouter from './vpn.js';
+import scriptsRouter from './scripts.js';
+import updatesRouter from './updates.js';
+import settingsRouter from './settings.js';
+import adminsRouter from './admins.js';
+import routersRouter from './routers.js';
 
 const router = Router();
+
+// ---------- sub-routers (Phase 4 modules) ----------
+router.use('/configs',  configsRouter);
+router.use('/vpn',      vpnRouter);
+router.use('/scripts',  scriptsRouter);
+router.use('/updates',  updatesRouter);
+router.use('/settings', settingsRouter);
+router.use('/admins',   adminsRouter);
+router.use('/routers-admin', routersRouter);
 
 /** `?routerId=1` selects DB router; omit or invalid → env default (primary). */
 function routerIdFromQuery(q) {

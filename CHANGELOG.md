@@ -1,6 +1,58 @@
 # 📋 Skynity ISP — Changelog & Roadmap
 
-## ✅ Phase 1, 2, 3 — Complete (Current: v0.3)
+## ✅ Phase 4 — Complete (Current: v0.4)
+
+### Config Files (VPS → MikroTik)
+- Upload `.rsc`, `.backup`, `.conf`, and script files to the VPS via admin panel
+- Every file gets a SHA-256 checksum + signed download token
+- **Push to any router** — the VPS serves the file over HTTP, and the router
+  pulls it via `/tool/fetch` then runs `/import` (for `.rsc`) — all in one click
+- Full push history with status (uploading / importing / success / failed) per router
+
+### VPN Tunnels
+- Unified registry for **WireGuard, IPsec, PPTP, L2TP, OpenVPN, SSTP**
+- WireGuard: auto-generated X25519 keypairs, peer management, wg-quick client
+  config export with one click (download `.conf` and plug into phone)
+- IPsec / L2TP: pre-shared key stored encrypted (AES-GCM)
+- All secrets encrypted at rest, synced to MikroTik via REST
+
+### RouterOS Scripts
+- Save reusable scripts in DB with tags and policy
+- Execute against any router with full audit trail (output captured)
+- Inline one-shot runner — paste a command and run it without saving
+- Every execution logged to `script_executions`
+
+### RouterOS Updates & Packages
+- Check / download / install RouterOS per router (queued with status)
+- Per-package enable / disable
+- Reboot router from UI
+- Full task history
+
+### System Settings
+- 16+ runtime tunables (brand, provisioning, telegram, security, vpn,
+  updates, branding) editable from the admin panel — no redeploys
+- Typed values (string / number / boolean / json) with validation
+- Secret fields (passwords, API keys) masked in the list view
+
+### Admin Users
+- Superadmin-gated CRUD for dashboard users
+- Role switcher (superadmin · admin · reseller · viewer)
+- Enable / disable toggle, Telegram linkage, bcrypt password hashing
+
+### Router CRUD
+- Add / edit / test / delete MikroTik routers directly from the web UI
+- Test connection before saving (calls `/system/resource`)
+- Default-router flag with atomic swap
+
+### Extended MikroTik client
+- `/file`, `/system/script`, `/tool/fetch`, `/import`, `/execute`
+- `/interface/wireguard` + `/interface/wireguard/peers`
+- `/ip/ipsec/*`, `/interface/pptp-server|l2tp-server|ovpn-server|sstp-server`
+- `/system/package/update/*`, `/system/backup/*`
+
+---
+
+## ✅ Phase 1, 2, 3 — Complete (v0.3)
 
 ### Core Platform
 - Full database schema (9 tables, FK-constrained, indexed)
