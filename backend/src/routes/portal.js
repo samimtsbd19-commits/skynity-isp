@@ -46,6 +46,7 @@ import otp from '../services/otp.js';
 import trial from '../services/trial.js';
 import bcrypt from 'bcrypt';
 import { signCustomerToken, requireCustomer } from '../middleware/auth.js';
+import { bandwidthDaily } from '../services/bandwidth.js';
 
 const router = Router();
 
@@ -151,7 +152,7 @@ async function paymentInfo() {
 // ============================================================
 router.get('/packages', getLimiter, async (_req, res) => {
   try {
-    const [pkgs, brandName, logoUrl, primaryColor, pay, flags, androidUrl, iosUrl] = await Promise.all([
+    const [pkgs, brandName, logoUrl, primaryColor, pay, flags, androidUrl, iosUrl, content, support] = await Promise.all([
       publicPackageInfo(),
       settings.getSetting('site.name'),
       settings.getSetting('branding.logo_url'),
@@ -160,6 +161,8 @@ router.get('/packages', getLimiter, async (_req, res) => {
       publicFeatureFlags(),
       settings.getSetting('site.app_android_url'),
       settings.getSetting('site.app_ios_url'),
+      publicPortalContent(),
+      publicSupportInfo(),
     ]);
     res.json({
       packages: pkgs,
@@ -176,12 +179,48 @@ router.get('/packages', getLimiter, async (_req, res) => {
         android_url: androidUrl || '',
         ios_url: iosUrl || '',
       },
+      content,
+      support,
     });
   } catch (err) {
     logger.error({ err }, 'portal packages failed');
     res.status(500).json({ error: 'internal error' });
   }
 });
+
+/** All admin-editable portal copy in one shot. */
+async function publicPortalContent() {
+  const keys = [
+    'portal.intro_title', 'portal.intro_html', 'portal.rules_html',
+    'portal.guide_html', 'portal.troubleshoot_html', 'portal.support_hours',
+  ];
+  const out = {};
+  for (const k of keys) out[k.replace('portal.', '')] = (await settings.getSetting(k)) || '';
+  return out;
+}
+
+/** Support / social channels, used by the "Chat with support" FAB
+ *  and the portal footer. */
+async function publicSupportInfo() {
+  const [whatsapp, telegram, messenger, email, facebook, youtube, website] = await Promise.all([
+    settings.getSetting('portal.support_whatsapp'),
+    settings.getSetting('portal.support_telegram'),
+    settings.getSetting('portal.support_messenger'),
+    settings.getSetting('portal.support_email'),
+    settings.getSetting('portal.facebook_url'),
+    settings.getSetting('portal.youtube_url'),
+    settings.getSetting('portal.website_url'),
+  ]);
+  return {
+    whatsapp: whatsapp || '',
+    telegram: telegram || '',
+    messenger: messenger || '',
+    email: email || '',
+    facebook: facebook || '',
+    youtube: youtube || '',
+    website: website || '',
+  };
+}
 
 // ============================================================
 // 1b) GET /portal/flags — a lighter endpoint when only the
@@ -900,6 +939,24 @@ router.post('/account/link', requireCustomer, postLimiter, async (req, res) => {
     res.json({ ok: true, customer_id: order.customer_id });
   } catch (err) {
     logger.error({ err }, 'account link failed');
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+router.get('/account/subscriptions/:id/bandwidth', requireCustomer, async (req, res) => {
+  try {
+    const acc = req.account;
+    if (!acc.customer_id) return res.status(400).json({ error: 'link an existing order first' });
+    const sub = await db.queryOne(
+      'SELECT id, customer_id FROM subscriptions WHERE id = ?',
+      [req.params.id]
+    );
+    if (!sub || sub.customer_id !== acc.customer_id) return res.status(404).json({ error: 'subscription not found' });
+    const days = Math.max(1, Math.min(30, Number(req.query.days) || 14));
+    const rows = await bandwidthDaily(sub.id, days);
+    res.json({ days: rows });
+  } catch (err) {
+    logger.error({ err }, 'portal bandwidth failed');
     res.status(500).json({ error: 'internal error' });
   }
 });

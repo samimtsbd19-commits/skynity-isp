@@ -7,9 +7,11 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import {
   apiCustomer, apiNotifyChannels, apiNotifySendCredentials,
+  apiSubscriptionBandwidth,
 } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { StatusPill, Skeleton } from '../components/primitives';
+import BandwidthChart from '../components/BandwidthChart';
 
 const currencyFmt = (n) =>
   new Intl.NumberFormat('en-BD', { style: 'currency', currency: 'BDT', maximumFractionDigits: 0 }).format(n || 0);
@@ -120,8 +122,10 @@ function SubscriptionCard({ sub }) {
   const expires = new Date(sub.expires_at);
   const expired = expires < new Date();
   const daysLeft = Math.ceil((expires - new Date()) / 86400000);
+  const [showChart, setShowChart] = useState(false);
 
   return (
+    <>
     <div className="panel p-5 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
       <div>
         <div className="flex items-center gap-2">
@@ -152,11 +156,24 @@ function SubscriptionCard({ sub }) {
         <div className={`text-xs mt-0.5 font-mono ${expired ? 'text-red' : daysLeft < 3 ? 'text-amber' : 'text-text-mute'}`}>
           {expired ? 'Expired' : `${daysLeft} days left`}
         </div>
-        <div className="mt-3">
+        <div className="mt-3 flex justify-end gap-2">
+          <button
+            onClick={() => setShowChart((v) => !v)}
+            className="btn btn-ghost text-xs"
+            title="Show daily bandwidth usage"
+          >
+            📊 {showChart ? 'Hide' : 'Usage'}
+          </button>
           <SendCredentialsButton subscriptionId={sub.id} />
         </div>
       </div>
     </div>
+    {showChart && (
+      <div className="mt-2">
+        <BandwidthChart fetcher={(days) => apiSubscriptionBandwidth(sub.id, days)} />
+      </div>
+    )}
+    </>
   );
 }
 

@@ -21,7 +21,7 @@ import axios from 'axios';
 const api = axios.create({ baseURL: '/api/portal', timeout: 20000 });
 
 // ---------- shared primitives ----------
-function Layout({ children, branding }) {
+function Layout({ children, branding, support }) {
   const color = branding?.primary_color || '#f59e0b';
   const name = branding?.name || 'Skynity ISP';
   return (
@@ -71,8 +71,106 @@ function Layout({ children, branding }) {
           <p className="muted" style={{ margin: '6px 0 0' }}>Buy WiFi access in minutes</p>
         </header>
         {children}
+        <PortalFooter branding={branding} support={support} />
       </div>
+      <SupportFab support={support} color={color} />
     </div>
+  );
+}
+
+// ===================================================================
+// Floating "Chat with support" button — appears on every portal
+// page if at least one support channel is configured.
+// ===================================================================
+function SupportFab({ support, color }) {
+  const [open, setOpen] = useState(false);
+  if (!support) return null;
+  const channels = [];
+  if (support.whatsapp) channels.push({
+    key: 'whatsapp', label: 'WhatsApp', icon: '💬', color: '#25d366',
+    href: `https://wa.me/${String(support.whatsapp).replace(/[^\d]/g, '')}?text=${encodeURIComponent('Hi! I need help with my internet.')}`,
+  });
+  if (support.telegram) channels.push({
+    key: 'telegram', label: 'Telegram', icon: '📨', color: '#229ed9',
+    href: support.telegram.startsWith('http')
+      ? support.telegram
+      : `https://t.me/${support.telegram.replace(/^@/, '')}`,
+  });
+  if (support.messenger) channels.push({
+    key: 'messenger', label: 'Messenger', icon: '💬', color: '#006aff',
+    href: support.messenger,
+  });
+  if (support.email) channels.push({
+    key: 'email', label: 'Email', icon: '✉️', color: '#6b7280',
+    href: `mailto:${support.email}`,
+  });
+  if (!channels.length) return null;
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Chat with support"
+        style={{
+          position: 'fixed', right: 16, bottom: 16, zIndex: 90,
+          width: 54, height: 54, borderRadius: '50%', border: 0, cursor: 'pointer',
+          background: color, color: '#0b0b0d', fontSize: 24,
+          boxShadow: '0 8px 30px rgba(0,0,0,0.4)',
+        }}
+      >{open ? '×' : '💬'}</button>
+      {open && (
+        <div style={{
+          position: 'fixed', right: 16, bottom: 80, zIndex: 90,
+          background: '#16161a', border: '1px solid #2a2a30', borderRadius: 12,
+          padding: 14, width: 260, boxShadow: '0 8px 30px rgba(0,0,0,0.4)',
+        }}>
+          <div className="kicker" style={{ marginBottom: 6 }}>Need a hand?</div>
+          <div style={{ fontSize: 13, marginBottom: 10, color: '#cbd5e1' }}>
+            Pick a channel — we usually reply within a few minutes.
+          </div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {channels.map((c) => (
+              <a
+                key={c.key}
+                href={c.href}
+                target="_blank" rel="noopener noreferrer"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+                  border: '1px solid #2a2a30', borderRadius: 8,
+                  color: '#e7e7e9', background: '#0e0e11',
+                }}
+              >
+                <span style={{ color: c.color, fontSize: 18 }}>{c.icon}</span>
+                <span>{c.label}</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ===================================================================
+// Portal footer — social links + legal links + help link.
+// ===================================================================
+function PortalFooter({ branding, support }) {
+  const color = branding?.primary_color || '#f59e0b';
+  const s = support || {};
+  const hasSocial = s.facebook || s.youtube || s.website;
+  return (
+    <footer style={{
+      marginTop: 40, paddingTop: 20, borderTop: '1px solid #2a2a30',
+      textAlign: 'center', fontSize: 12, color: '#78787e',
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 16, flexWrap: 'wrap', marginBottom: 10 }}>
+        <Link to="/portal/help" style={{ color }}>Help & Guide</Link>
+        {s.facebook && <a href={s.facebook} target="_blank" rel="noopener noreferrer">Facebook</a>}
+        {s.youtube  && <a href={s.youtube}  target="_blank" rel="noopener noreferrer">YouTube</a>}
+        {s.website  && <a href={s.website}  target="_blank" rel="noopener noreferrer">Website</a>}
+      </div>
+      {hasSocial && <div style={{ opacity: .6 }}>© {new Date().getFullYear()} {branding?.name || 'Skynity'}</div>}
+    </footer>
   );
 }
 
@@ -97,10 +195,32 @@ function Landing() {
   const sym = info.currency_symbol || '৳';
   const flags = info.flags || {};
   const apps  = info.apps  || {};
+  const content = info.content || {};
+  const support = info.support || {};
   const color = info.branding?.primary_color || '#f59e0b';
 
   return (
-    <Layout branding={info.branding}>
+    <Layout branding={info.branding} support={support}>
+      {/* About us — admin-editable intro */}
+      {(content.intro_title || content.intro_html) && (
+        <div className="card" style={{
+          marginBottom: 20,
+          background: `linear-gradient(135deg, ${color}11, transparent)`,
+          border: `1px solid ${color}33`,
+        }}>
+          {content.intro_title && (
+            <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 6 }}>
+              {content.intro_title}
+            </div>
+          )}
+          {content.intro_html && (
+            <div style={{ fontSize: 13, color: '#cbd5e1', whiteSpace: 'pre-line' }}>
+              {content.intro_html}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Top promo row — free trial + PWA install */}
       {(flags.free_trial || flags.pwa_install) && (
         <div style={{ marginBottom: 20, display: 'grid', gap: 10 }}>
@@ -169,7 +289,82 @@ function Landing() {
           </div>
         </div>
       )}
+
+      {/* User guide / rules / troubleshooting — expandable so the
+          page stays short for repeat visitors but is fully
+          informative on first load. */}
+      <div style={{ marginTop: 32, display: 'grid', gap: 12 }}>
+        {content.guide_html && (
+          <ContentBlock
+            title="📘 How it works"
+            kicker="User guide"
+            body={content.guide_html}
+            defaultOpen
+            color={color}
+          />
+        )}
+        {content.rules_html && (
+          <ContentBlock
+            title="⚠️ Rules & fair-use"
+            kicker="Please read"
+            body={content.rules_html}
+            color={color}
+          />
+        )}
+        {content.troubleshoot_html && (
+          <ContentBlock
+            title="🔧 Having trouble?"
+            kicker="Troubleshooting"
+            body={content.troubleshoot_html}
+            color={color}
+          />
+        )}
+        {content.support_hours && (
+          <div style={{
+            textAlign: 'center', fontSize: 12, color: '#94a3b8',
+            padding: '10px 14px', border: '1px dashed #2a2a30', borderRadius: 8,
+          }}>
+            {content.support_hours}
+          </div>
+        )}
+      </div>
     </Layout>
+  );
+}
+
+// ===================================================================
+// Collapsible content block for admin-editable portal copy.
+// ===================================================================
+function ContentBlock({ title, kicker, body, defaultOpen = false, color }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: '100%', padding: '14px 18px', background: 'transparent',
+          border: 0, color: 'inherit', textAlign: 'left', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}
+      >
+        <div style={{ flex: 1 }}>
+          {kicker && <div className="kicker" style={{ marginBottom: 4 }}>{kicker}</div>}
+          <div style={{ fontWeight: 600, fontSize: 15 }}>{title}</div>
+        </div>
+        <div style={{
+          color, fontSize: 18, transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
+          transition: 'transform .2s',
+        }}>⌄</div>
+      </button>
+      {open && (
+        <div style={{
+          padding: '0 18px 16px', fontSize: 13, color: '#cbd5e1',
+          whiteSpace: 'pre-line',
+        }}>
+          {body}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1069,6 +1264,99 @@ function Renew() {
 // completely outside the admin app.
 // ===================================================================
 // ===================================================================
+// Page: Help & guide — /portal/help
+// ===================================================================
+function Help() {
+  const info = useBranding();
+  const color = info?.branding?.primary_color || '#f59e0b';
+  const content = info?.content || {};
+  const support = info?.support || {};
+
+  return (
+    <Layout branding={info?.branding} support={support}>
+      <div style={{ marginBottom: 16 }}>
+        <Link to="/portal" style={{ color, fontSize: 13 }}>← Back to packages</Link>
+      </div>
+
+      {content.intro_title && (
+        <div className="card" style={{
+          marginBottom: 16,
+          background: `linear-gradient(135deg, ${color}11, transparent)`,
+          border: `1px solid ${color}33`,
+        }}>
+          <div className="kicker">About us</div>
+          <div style={{ fontWeight: 700, fontSize: 18, margin: '4px 0 8px' }}>
+            {content.intro_title}
+          </div>
+          {content.intro_html && (
+            <div style={{ fontSize: 13.5, color: '#cbd5e1', whiteSpace: 'pre-line' }}>
+              {content.intro_html}
+            </div>
+          )}
+        </div>
+      )}
+
+      {content.guide_html && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="kicker">User guide</div>
+          <h3 style={{ margin: '6px 0 10px' }}>📘 How to get started</h3>
+          <div style={{ fontSize: 13.5, color: '#cbd5e1', whiteSpace: 'pre-line' }}>
+            {content.guide_html}
+          </div>
+        </div>
+      )}
+
+      {content.troubleshoot_html && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="kicker">Troubleshooting</div>
+          <h3 style={{ margin: '6px 0 10px' }}>🔧 Connection problems?</h3>
+          <div style={{ fontSize: 13.5, color: '#cbd5e1', whiteSpace: 'pre-line' }}>
+            {content.troubleshoot_html}
+          </div>
+        </div>
+      )}
+
+      {content.rules_html && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="kicker">Rules & warnings</div>
+          <h3 style={{ margin: '6px 0 10px' }}>⚠️ Fair-use policy</h3>
+          <div style={{ fontSize: 13.5, color: '#cbd5e1', whiteSpace: 'pre-line' }}>
+            {content.rules_html}
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <div className="kicker">Contact support</div>
+        <h3 style={{ margin: '6px 0 10px' }}>💬 Need a real person?</h3>
+        <div style={{ fontSize: 13, color: '#cbd5e1', marginBottom: 12 }}>
+          {content.support_hours || 'Our team is just a tap away.'}
+        </div>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {support.whatsapp && (
+            <a className="btn btn-ghost" href={`https://wa.me/${String(support.whatsapp).replace(/[^\d]/g, '')}`} target="_blank" rel="noopener noreferrer">💬 WhatsApp — {support.whatsapp}</a>
+          )}
+          {support.telegram && (
+            <a className="btn btn-ghost" href={support.telegram.startsWith('http') ? support.telegram : `https://t.me/${support.telegram.replace(/^@/, '')}`} target="_blank" rel="noopener noreferrer">📨 Telegram — {support.telegram}</a>
+          )}
+          {support.messenger && (
+            <a className="btn btn-ghost" href={support.messenger} target="_blank" rel="noopener noreferrer">💬 Messenger</a>
+          )}
+          {support.email && (
+            <a className="btn btn-ghost" href={`mailto:${support.email}`}>✉️ {support.email}</a>
+          )}
+          {!support.whatsapp && !support.telegram && !support.messenger && !support.email && (
+            <div className="muted" style={{ fontSize: 12 }}>
+              Support channels haven't been configured yet. Please check back soon.
+            </div>
+          )}
+        </div>
+      </div>
+    </Layout>
+  );
+}
+
+// ===================================================================
 // Page: Free trial — /portal/trial
 // ===================================================================
 function TrialClaim() {
@@ -1392,6 +1680,7 @@ function SubscriptionBlock({ sub, color, packages, api: authApi, onDone }) {
   const [err, setErr] = useState('');
   const [ok, setOk] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [showUsage, setShowUsage] = useState(false);
 
   const expires = new Date(sub.expires_at);
   const daysLeft = Math.ceil((expires - new Date()) / 86400000);
@@ -1432,6 +1721,14 @@ function SubscriptionBlock({ sub, color, packages, api: authApi, onDone }) {
       {!changing && !ok && (
         <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={() => setChanging(true)} className="btn btn-ghost">🔁 Change package</button>
+          <button onClick={() => setShowUsage((v) => !v)} className="btn btn-ghost">
+            📊 {showUsage ? 'Hide usage' : 'Show usage'}
+          </button>
+        </div>
+      )}
+      {showUsage && (
+        <div style={{ marginTop: 10 }}>
+          <PortalBandwidthChart api={authApi} subscriptionId={sub.id} color={color} />
         </div>
       )}
       {changing && (
@@ -1473,6 +1770,122 @@ function axiosClone() {
   return axios.create({ baseURL: '/api/portal', timeout: 20000 });
 }
 
+function fmtBytes(n) {
+  n = Number(n) || 0;
+  if (n < 1024)       return `${n} B`;
+  if (n < 1024 ** 2)  return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 ** 3)  return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  if (n < 1024 ** 4)  return `${(n / 1024 ** 3).toFixed(2)} GB`;
+  return                      `${(n / 1024 ** 4).toFixed(2)} TB`;
+}
+
+// ===================================================================
+// Per-subscription bandwidth chart for the customer dashboard.
+// Fetches daily totals via the authenticated portal API and draws
+// a small stacked-bar chart in inline SVG (no extra deps).
+// ===================================================================
+function PortalBandwidthChart({ api: authApi, subscriptionId, color }) {
+  const [days, setDays] = useState(14);
+  const [rows, setRows] = useState(null);
+  const [err,  setErr]  = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setErr(''); setRows(null);
+    authApi.get(`/account/subscriptions/${subscriptionId}/bandwidth`, { params: { days } })
+      .then((r) => { if (!cancelled) setRows(r.data.days); })
+      .catch((e) => { if (!cancelled) setErr(e?.response?.data?.error || e.message); });
+    return () => { cancelled = true; };
+  }, [authApi, subscriptionId, days]);
+
+  const totals = useMemo(() => {
+    if (!rows) return { inB: 0, outB: 0, max: 0 };
+    let inB = 0, outB = 0, max = 0;
+    for (const r of rows) {
+      inB  += Number(r.bytes_in)  || 0;
+      outB += Number(r.bytes_out) || 0;
+      const t = (Number(r.bytes_in) || 0) + (Number(r.bytes_out) || 0);
+      if (t > max) max = t;
+    }
+    return { inB, outB, max };
+  }, [rows]);
+
+  return (
+    <div style={{
+      background: '#0e0e11', border: '1px solid #2a2a30',
+      borderRadius: 8, padding: 12,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div className="muted" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.15em' }}>
+          Daily usage · last {days}d
+        </div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {[7, 14, 30].map((d) => (
+            <button
+              key={d}
+              onClick={() => setDays(d)}
+              style={{
+                fontSize: 10, padding: '2px 6px', border: 0, cursor: 'pointer',
+                background: days === d ? color : 'transparent',
+                color:      days === d ? '#0b0b0d' : '#cbd5e1',
+                borderRadius: 3,
+              }}
+            >
+              {d}d
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {err ? (
+        <div style={{ color: '#ff6b6b', fontSize: 12, padding: '12px 0' }}>{err}</div>
+      ) : !rows ? (
+        <div style={{ height: 60, background: '#16161a', borderRadius: 4 }} />
+      ) : totals.max === 0 ? (
+        <div className="muted" style={{ fontSize: 12, textAlign: 'center', padding: '16px 0', fontStyle: 'italic' }}>
+          No traffic recorded yet.
+        </div>
+      ) : (
+        <>
+          <div style={{ height: 70, display: 'flex', gap: 2, alignItems: 'flex-end' }}>
+            {rows.map((r) => {
+              const total = (Number(r.bytes_in) + Number(r.bytes_out)) || 0;
+              const inH  = totals.max ? (Number(r.bytes_in)  / totals.max) * 100 : 0;
+              const outH = totals.max ? (Number(r.bytes_out) / totals.max) * 100 : 0;
+              return (
+                <div
+                  key={r.day}
+                  title={`${r.day}\n↓ ${fmtBytes(r.bytes_in)}\n↑ ${fmtBytes(r.bytes_out)}\ntotal ${fmtBytes(total)}`}
+                  style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 1, minWidth: 4 }}
+                >
+                  <div style={{ height: `${outH}%`, background: '#06b6d4', borderRadius: '2px 2px 0 0' }} />
+                  <div style={{ height: `${inH}%`,  background: color }} />
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ marginTop: 8, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 8, height: 8, background: color, borderRadius: 2 }} />
+              <span className="muted">Download</span>
+              <span style={{ marginLeft: 'auto', fontFamily: 'ui-monospace, Menlo, monospace' }}>
+                {fmtBytes(totals.inB)}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 8, height: 8, background: '#06b6d4', borderRadius: 2 }} />
+              <span className="muted">Upload</span>
+              <span style={{ marginLeft: 'auto', fontFamily: 'ui-monospace, Menlo, monospace' }}>
+                {fmtBytes(totals.outB)}
+              </span>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function PublicPortal() {
   return (
     <Routes>
@@ -1481,6 +1894,7 @@ export default function PublicPortal() {
       <Route path="/redeem" element={<Redeem />} />
       <Route path="/renew" element={<Renew />} />
       <Route path="/trial" element={<TrialClaim />} />
+      <Route path="/help" element={<Help />} />
       <Route path="/login" element={<CustomerLogin />} />
       <Route path="/account" element={<AccountShell />} />
       <Route path="/status" element={<StatusLookup />} />

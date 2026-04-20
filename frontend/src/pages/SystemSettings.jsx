@@ -14,18 +14,19 @@ import { PageHeader } from '../components/PageHeader';
 import { Skeleton } from '../components/primitives';
 
 const SECTIONS = [
-  { key: 'feature',      title: 'Features (on / off)', icon: Zap },
-  { key: 'site',         title: 'Site',                icon: Globe },
-  { key: 'branding',     title: 'Branding / Logo',     icon: Palette },
-  { key: 'payment',      title: 'Payment methods',     icon: CreditCard },
-  { key: 'invoice',      title: 'Invoicing',           icon: FileText },
-  { key: 'trial',        title: 'Free trial',          icon: Gift },
-  { key: 'provisioning', title: 'Provisioning',        icon: Cog },
+  { key: 'feature',      title: 'Features (on / off)',            icon: Zap },
+  { key: 'site',         title: 'Site',                           icon: Globe },
+  { key: 'branding',     title: 'Branding / Logo',                icon: Palette },
+  { key: 'portal',       title: 'Public portal content & support', icon: FileText },
+  { key: 'payment',      title: 'Payment methods',                icon: CreditCard },
+  { key: 'invoice',      title: 'Invoicing',                      icon: FileText },
+  { key: 'trial',        title: 'Free trial',                     icon: Gift },
+  { key: 'provisioning', title: 'Provisioning',                   icon: Cog },
   { key: 'notify',       title: 'Notifications (OTP / SMS / WhatsApp / Telegram)', icon: MessageSquare },
-  { key: 'telegram',     title: 'Telegram',            icon: Phone },
-  { key: 'security',     title: 'Security',            icon: Shield },
-  { key: 'vpn',          title: 'VPN defaults',        icon: Shield },
-  { key: 'updates',      title: 'Updates',             icon: Clock },
+  { key: 'telegram',     title: 'Telegram',                       icon: Phone },
+  { key: 'security',     title: 'Security',                       icon: Shield },
+  { key: 'vpn',          title: 'VPN defaults',                   icon: Shield },
+  { key: 'updates',      title: 'Updates',                        icon: Clock },
 ];
 
 export default function SystemSettings() {
@@ -246,6 +247,22 @@ function NotifyChannelStatus() {
   );
 }
 
+// Keys that should always render as a multi-line textarea, even
+// when the saved value is short. Matches the admin-editable portal
+// copy (intro paragraph, rules, guide, troubleshooting, etc).
+const TEXTAREA_KEYS = new Set([
+  'portal.intro_html',
+  'portal.rules_html',
+  'portal.guide_html',
+  'portal.troubleshoot_html',
+]);
+function needsTextarea(setting, value) {
+  if (setting.type !== 'string') return false;
+  if (TEXTAREA_KEYS.has(setting.key)) return true;
+  const s = String(value ?? '');
+  return s.includes('\n') || s.length > 80;
+}
+
 function SettingInput({ setting, value, onChange }) {
   const label = setting.key.split('.').slice(1).join('.') || setting.key;
   return (
@@ -284,6 +301,13 @@ function SettingInput({ setting, value, onChange }) {
             onChange={(e) => {
               try { onChange(JSON.parse(e.target.value)); } catch { onChange(e.target.value); }
             }}
+          />
+        ) : needsTextarea(setting, value) ? (
+          <textarea
+            className="input font-mono text-[12px]"
+            rows={Math.min(10, Math.max(3, String(value ?? '').split('\n').length + 1))}
+            value={value ?? ''}
+            onChange={(e) => onChange(e.target.value)}
           />
         ) : (
           <input

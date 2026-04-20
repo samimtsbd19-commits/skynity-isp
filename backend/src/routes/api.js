@@ -16,6 +16,7 @@ import vouchersRouter from './vouchers.js';
 import notifyRouter from './notify.js';
 import customerAccountsRouter from './customerAccounts.js';
 import { sendExpiryReminders } from '../jobs/scheduler.js';
+import { bandwidthDaily } from '../services/bandwidth.js';
 import { renderInvoiceForOrder } from '../services/invoice.js';
 
 const router = Router();
@@ -393,6 +394,16 @@ router.get('/subscriptions', requireAdmin, async (req, res) => {
     params
   );
   res.json({ subscriptions: rows });
+});
+
+// ===================== BANDWIDTH =========================
+// Returns a daily aggregate of bytes_in / bytes_out for a
+// subscription. The UI renders this as a stacked-bar chart.
+router.get('/subscriptions/:id/bandwidth', requireAdmin, async (req, res) => {
+  try {
+    const rows = await bandwidthDaily(Number(req.params.id), Number(req.query.days) || 14);
+    res.json({ days: rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ===================== MIKROTIK LIVE =====================

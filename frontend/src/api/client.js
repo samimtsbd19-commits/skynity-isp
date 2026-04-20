@@ -240,6 +240,10 @@ export const apiResetAccountPw  = (id, password) =>
 export const apiRunExpiryReminders = () =>
   api.post('/jobs/expiry-reminders/run').then((r) => r.data);
 
+// ---------- Bandwidth ----------
+export const apiSubscriptionBandwidth = (id, days = 14) =>
+  api.get(`/subscriptions/${id}/bandwidth`, { params: { days } }).then((r) => r.data.days);
+
 // ---------- Notifications ----------
 export const apiNotifyChannels = () =>
   api.get('/notify/channels').then((r) => r.data.channels);

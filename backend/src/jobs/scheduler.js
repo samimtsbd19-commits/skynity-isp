@@ -74,39 +74,121 @@ async function expireDueSubs() {
 }
 
 async function refreshLastSeen() {
-  // Try each distinct router
   const routers = await db.query(
     `SELECT DISTINCT router_id FROM subscriptions WHERE status = 'active'`
   );
   for (const { router_id } of routers) {
     try {
       const mt = await getMikrotikClient(router_id);
-      const [pppActive, hsActive, leases] = await Promise.all([
+      const [pppActive, hsActive] = await Promise.all([
         mt.listPppActive().catch(() => []),
         mt.listHotspotActive().catch(() => []),
-        mt.listDhcpLeases().catch(() => []),
       ]);
 
       for (const a of pppActive) {
-        await db.query(
-          `UPDATE subscriptions
-           SET last_seen_at = NOW(), last_ip = ?
-           WHERE login_username = ? AND service_type = 'pppoe' AND router_id = ?`,
-          [a.address || null, a.name, router_id]
+        const subs = await db.query(
+          `SELECT id FROM subscriptions
+            WHERE login_username = ? AND service_type = 'pppoe' AND router_id = ?`,
+          [a.name, router_id]
         );
+        for (const s of subs) {
+          await db.query(
+            `UPDATE subscriptions SET last_seen_at = NOW(), last_ip = ? WHERE id = ?`,
+            [a.address || null, s.id]
+          );
+          await snapshotUsage(s.id, router_id, 'pppoe', a);
+        }
       }
       for (const a of hsActive) {
-        await db.query(
-          `UPDATE subscriptions
-           SET last_seen_at = NOW(), last_ip = ?, last_mac = ?
-           WHERE login_username = ? AND service_type = 'hotspot' AND router_id = ?`,
-          [a.address || null, a['mac-address'] || null, a.user, router_id]
+        const subs = await db.query(
+          `SELECT id FROM subscriptions
+            WHERE login_username = ? AND service_type = 'hotspot' AND router_id = ?`,
+          [a.user, router_id]
         );
+        for (const s of subs) {
+          await db.query(
+            `UPDATE subscriptions SET last_seen_at = NOW(), last_ip = ?, last_mac = ? WHERE id = ?`,
+            [a.address || null, a['mac-address'] || null, s.id]
+          );
+          await snapshotUsage(s.id, router_id, 'hotspot', a);
+        }
       }
       logger.info({ router_id, ppp: pppActive.length, hs: hsActive.length }, 'monitoring refreshed');
     } catch (err) {
       logger.error({ err: err.message, router_id }, 'monitoring refresh failed');
     }
+  }
+}
+
+/**
+ * Record one usage snapshot for a subscription and accumulate its
+ * lifetime bytes counters. We store both the raw cumulative counter
+ * (from RouterOS) and the delta since the previous snapshot — the
+ * delta is what the daily chart aggregates by.
+ */
+async function snapshotUsage(subscriptionId, routerId, serviceType, active) {
+  const cumIn  = toBigInt(active['bytes-in']);
+  const cumOut = toBigInt(active['bytes-out']);
+  if (cumIn === null && cumOut === null) return; // nothing useful
+
+  // Find the most recent snapshot for this subscription within the
+  // last 2 hours. Beyond that we treat as a fresh session.
+  const prev = await db.queryOne(
+    `SELECT cum_in, cum_out, taken_at FROM usage_snapshots
+      WHERE subscription_id = ? AND taken_at > NOW() - INTERVAL 2 HOUR
+      ORDER BY id DESC LIMIT 1`,
+    [subscriptionId]
+  );
+
+  let deltaIn = 0n, deltaOut = 0n;
+  const cIn  = cumIn  ?? 0n;
+  const cOut = cumOut ?? 0n;
+  if (prev) {
+    const pIn  = BigInt(prev.cum_in  || 0);
+    const pOut = BigInt(prev.cum_out || 0);
+    deltaIn  = cIn  >= pIn  ? cIn  - pIn  : cIn;   // counter reset → bank the whole new value
+    deltaOut = cOut >= pOut ? cOut - pOut : cOut;
+  } else {
+    // First snapshot of a session — don't bank the cumulative value
+    // as "today's usage" (we don't actually know when the session
+    // started). Start the odometer here.
+    deltaIn  = 0n;
+    deltaOut = 0n;
+  }
+
+  await db.query(
+    `INSERT INTO usage_snapshots (subscription_id, router_id, service_type, cum_in, cum_out, delta_in, delta_out)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [subscriptionId, routerId, serviceType, cIn.toString(), cOut.toString(), deltaIn.toString(), deltaOut.toString()]
+  );
+
+  // Maintain the running counters on the subscription row itself
+  // so the old /stats endpoints keep working without a join.
+  if (deltaIn > 0n || deltaOut > 0n) {
+    await db.query(
+      `UPDATE subscriptions
+          SET bytes_in  = bytes_in  + ?,
+              bytes_out = bytes_out + ?
+        WHERE id = ?`,
+      [deltaIn.toString(), deltaOut.toString(), subscriptionId]
+    );
+  }
+}
+
+function toBigInt(v) {
+  if (v == null) return null;
+  try { return BigInt(String(v)); } catch { return null; }
+}
+
+/** Prune snapshots older than 180 days to keep the table small. */
+async function pruneUsageSnapshots() {
+  try {
+    const r = await db.query(
+      `DELETE FROM usage_snapshots WHERE taken_at < NOW() - INTERVAL 180 DAY LIMIT 10000`
+    );
+    if (r.affectedRows) logger.info({ pruned: r.affectedRows }, 'usage_snapshots pruned');
+  } catch (err) {
+    logger.warn({ err: err.message }, 'usage prune failed');
   }
 }
 
@@ -207,11 +289,16 @@ async function sendExpiryReminders() {
 }
 
 export function startJobs() {
-  cron.schedule('*/5 * * * *', () => retryUnsyncedSubs().catch((e) => logger.error({ e }, 'retry job')));
+  cron.schedule('*/5 * * * *',  () => retryUnsyncedSubs().catch((e) => logger.error({ e }, 'retry job')));
   cron.schedule('*/15 * * * *', () => expireDueSubs().catch((e) => logger.error({ e }, 'expire job')));
-  cron.schedule('0 * * * *',    () => refreshLastSeen().catch((e) => logger.error({ e }, 'monitor job')));
+  // Every 10 min: refresh last-seen AND snapshot bandwidth usage
+  // for every active PPPoE/Hotspot session. Tighter than the old
+  // hourly tick so daily usage charts have enough resolution.
+  cron.schedule('*/10 * * * *', () => refreshLastSeen().catch((e) => logger.error({ e }, 'monitor job')));
   // Once a day — 08:00 local (TZ comes from the container / env).
   cron.schedule('0 8 * * *',    () => sendExpiryReminders().catch((e) => logger.error({ e }, 'expiry reminder job')));
+  // Overnight: drop snapshots older than the retention window.
+  cron.schedule('30 3 * * *',   () => pruneUsageSnapshots());
   logger.info('cron jobs scheduled');
 }
 
