@@ -47,6 +47,7 @@ import trial from '../services/trial.js';
 import bcrypt from 'bcrypt';
 import { signCustomerToken, requireCustomer } from '../middleware/auth.js';
 import { bandwidthDaily } from '../services/bandwidth.js';
+import offersService from '../services/offers.js';
 
 const router = Router();
 
@@ -234,6 +235,36 @@ router.get('/flags', getLimiter, async (_req, res) => {
     logger.error({ err }, 'portal flags failed');
     res.status(500).json({ error: 'internal error' });
   }
+});
+
+// ============================================================
+// 1c) GET /portal/offers — active promotional offers for the
+//     landing page (banner + featured package highlight).
+//     Gated by the `feature.offers_portal` flag.
+// ============================================================
+router.get('/offers', getLimiter, async (_req, res) => {
+  try {
+    const enabled = await settings.getSetting('feature.offers_portal');
+    if (enabled === false || String(enabled).toLowerCase() === 'false') {
+      return res.json({ offers: [] });
+    }
+    const list = await offersService.listActiveOffers();
+    res.json({ offers: list });
+  } catch (err) {
+    logger.error({ err }, 'portal offers failed');
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// POST /portal/offers/:id/view — best-effort impression tracking.
+router.post('/offers/:id/view', getLimiter, async (req, res) => {
+  try {
+    await offersService.recordOfferView(req.params.id, {
+      phone: req.body?.phone,
+      ip: clientIp(req),
+    });
+    res.json({ ok: true });
+  } catch (err) { res.status(200).json({ ok: false }); } // never block the UI
 });
 
 /**

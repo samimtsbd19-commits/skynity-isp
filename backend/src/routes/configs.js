@@ -57,6 +57,40 @@ router.get('/generate/login.html', requireAdmin, async (req, res) => {
   }
 });
 
+/** GET /api/configs/generate/pcq.rsc — shared bandwidth queue tree */
+router.get('/generate/pcq.rsc', requireAdmin, async (req, res) => {
+  try {
+    const body = await gen.generatePcqRsc({
+      total_download:  req.query.total_download,
+      total_upload:    req.query.total_upload,
+      parent_download: req.query.parent_download,
+      parent_upload:   req.query.parent_upload,
+      mode:            req.query.mode,
+    });
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment; filename="skynity-pcq.rsc"');
+    res.send(body);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/configs/generate/pcq-preview — text preview for the UI */
+router.get('/generate/pcq-preview', requireAdmin, async (req, res) => {
+  try {
+    const body = await gen.generatePcqRsc({
+      total_download:  req.query.total_download,
+      total_upload:    req.query.total_upload,
+      parent_download: req.query.parent_download,
+      parent_upload:   req.query.parent_upload,
+      mode:            req.query.mode,
+    });
+    res.json({ rsc: body });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /** GET /api/configs/generate/preview — returns both as JSON (for in-app preview) */
 router.get('/generate/preview', requireAdmin, async (req, res) => {
   try {

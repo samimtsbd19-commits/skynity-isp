@@ -4,7 +4,7 @@ import {
   Activity, Router as RouterIcon, LogOut, Satellite,
   ScrollText, Settings, FileCode, Shield, Terminal,
   RefreshCw, UserCog, Cog, Ticket, ChevronDown, UserCheck,
-  HeartPulse, Globe,
+  HeartPulse, Globe, Megaphone,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
@@ -34,6 +34,7 @@ const GROUPS = [
       { to: '/customer-accounts',  label: 'nav.portalAccounts', icon: UserCheck },
       { to: '/subscriptions',      label: 'nav.subscriptions',  icon: Activity },
       { to: '/vouchers',           label: 'nav.vouchers',       icon: Ticket },
+      { to: '/offers',             label: 'nav.offers',         icon: Megaphone },
     ],
   },
   {

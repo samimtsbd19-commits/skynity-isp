@@ -206,11 +206,27 @@ function useBranding() {
 }
 
 // ===================================================================
+// Active marketing offers — shown at the top of the landing page.
+// The backend honours the `feature.offers_portal` flag, so we just
+// trust whatever it hands back.
+// ===================================================================
+function useActiveOffers() {
+  const [offers, setOffers] = useState([]);
+  useEffect(() => {
+    api.get('/offers')
+      .then((r) => setOffers(r.data?.offers || []))
+      .catch(() => setOffers([]));
+  }, []);
+  return offers;
+}
+
+// ===================================================================
 // Page: Landing — list of packages
 // ===================================================================
 function Landing() {
   const nav = useNavigate();
   const info = useBranding();
+  const offers = useActiveOffers();
   const t = useT();
 
   if (!info) return <Layout><div className="muted" style={{ textAlign: 'center' }}>{t('common.loading')}</div></Layout>;
@@ -222,6 +238,10 @@ function Landing() {
   const content = info.content || {};
   const support = info.support || {};
   const color = info.branding?.primary_color || '#f59e0b';
+
+  // Packages that are featured by any active offer — we highlight
+  // their card and show a small "offer" ribbon.
+  const featuredCodes = new Set(offers.map((o) => o.package_code).filter(Boolean));
 
   return (
     <Layout branding={info.branding} support={support}>
@@ -253,6 +273,25 @@ function Landing() {
         </div>
       )}
 
+      {/* Active marketing offers — each card scrolls the user down
+          to the featured package or opens the full order flow. */}
+      {offers.length > 0 && (
+        <div style={{ marginBottom: 20, display: 'grid', gap: 10 }}>
+          {offers.map((o) => (
+            <OfferBanner
+              key={o.id}
+              offer={o}
+              color={color}
+              onClick={() => {
+                if (o.package_code) {
+                  nav(`/portal/order?pkg=${encodeURIComponent(o.package_code)}&offer=${encodeURIComponent(o.code)}`);
+                }
+              }}
+            />
+          ))}
+        </div>
+      )}
+
       <div className="kicker" style={{ textAlign: 'center', marginBottom: 8 }}>Available packages</div>
       <h2 style={{ margin: '0 0 20px', textAlign: 'center', fontSize: 22 }}>Choose your <em style={{ color }}>plan</em></h2>
 
@@ -263,24 +302,46 @@ function Landing() {
         </div>
       ) : (
         <div className="grid">
-          {pkgs.map((p) => (
-            <button
-              key={p.code}
-              onClick={() => nav(`/portal/order?pkg=${encodeURIComponent(p.code)}`)}
-              className="pkg"
-              style={{ textAlign: 'left', color: 'inherit', font: 'inherit' }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <span className={`tag tag-${p.service_type}`}>{p.service_type}</span>
-                <span style={{ fontWeight: 700, color }}>
-                  {sym}{Number(p.price).toFixed(0)}
-                </span>
-              </div>
-              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{p.name}</div>
-              <div className="muted">{Number(p.rate_down_mbps)} Mbps · {Number(p.duration_days)} days</div>
-              {p.description && <div className="muted" style={{ marginTop: 6 }}>{p.description}</div>}
-            </button>
-          ))}
+          {pkgs.map((p) => {
+            const featured = featuredCodes.has(p.code);
+            return (
+              <button
+                key={p.code}
+                onClick={() => nav(`/portal/order?pkg=${encodeURIComponent(p.code)}`)}
+                className="pkg"
+                style={{
+                  textAlign: 'left', color: 'inherit', font: 'inherit',
+                  position: 'relative',
+                  ...(featured
+                    ? {
+                        borderColor: color,
+                        boxShadow: `0 0 0 1px ${color}, 0 0 22px ${color}33`,
+                      }
+                    : {}),
+                }}
+              >
+                {featured && (
+                  <span style={{
+                    position: 'absolute', top: -8, right: 10,
+                    background: color, color: '#0b0b0d', fontSize: 10,
+                    fontWeight: 700, padding: '3px 8px', borderRadius: 4,
+                    letterSpacing: '.1em', textTransform: 'uppercase',
+                  }}>
+                    🔥 Offer
+                  </span>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span className={`tag tag-${p.service_type}`}>{p.service_type}</span>
+                  <span style={{ fontWeight: 700, color }}>
+                    {sym}{Number(p.price).toFixed(0)}
+                  </span>
+                </div>
+                <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{p.name}</div>
+                <div className="muted">{Number(p.rate_down_mbps)} Mbps · {Number(p.duration_days)} days</div>
+                {p.description && <div className="muted" style={{ marginTop: 6 }}>{p.description}</div>}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -389,6 +450,60 @@ function ContentBlock({ title, kicker, body, defaultOpen = false, color }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ===================================================================
+// Single offer banner — admin-authored promo card.
+// ===================================================================
+function OfferBanner({ offer, color, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="card"
+      disabled={!offer.package_code}
+      style={{
+        background: `linear-gradient(135deg, ${color}22, ${color}08)`,
+        border: `1px solid ${color}66`,
+        textAlign: 'left', cursor: offer.package_code ? 'pointer' : 'default',
+        color: 'inherit', display: 'block', width: '100%',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+        <div style={{
+          fontSize: 28, lineHeight: 1,
+          filter: `drop-shadow(0 0 8px ${color}aa)`,
+        }}>🎁</div>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+            {offer.discount_label && (
+              <span style={{
+                background: color, color: '#0b0b0d',
+                fontSize: 10, fontWeight: 700, padding: '2px 6px',
+                borderRadius: 3, letterSpacing: '.08em', textTransform: 'uppercase',
+              }}>{offer.discount_label}</span>
+            )}
+            <span style={{ fontWeight: 700, fontSize: 16 }}>{offer.title}</span>
+          </div>
+          {offer.description && (
+            <div className="muted" style={{ color: '#cbd5e1', whiteSpace: 'pre-line' }}>
+              {offer.description}
+            </div>
+          )}
+          {offer.package_name && (
+            <div style={{ marginTop: 6, fontSize: 12, color }}>
+              📦 {offer.package_name}{' '}
+              {offer.package_price ? `— ৳${Number(offer.package_price).toFixed(0)}` : ''}
+              {offer.rate_down_mbps ? ` · ${Number(offer.rate_down_mbps)} Mbps` : ''}
+              {offer.duration_days ? ` · ${Number(offer.duration_days)} days` : ''}
+            </div>
+          )}
+        </div>
+        {offer.package_code && (
+          <span style={{ color, fontWeight: 600, fontSize: 13 }}>Get it →</span>
+        )}
+      </div>
+    </button>
   );
 }
 

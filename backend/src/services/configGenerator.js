@@ -414,7 +414,149 @@ function escapeHtml(s) {
     .replace(/'/g, '&#39;');
 }
 
+// ============================================================
+// Artefact 3 — pcq.rsc
+// ------------------------------------------------------------
+// Generates a RouterOS script that installs a PCQ (Per-Connection
+// Queue) tree so every active user fairly shares whatever link
+// capacity is configured in settings. When some users are idle,
+// their share is automatically redistributed to the active
+// ones — no cron, no manual intervention.
+//
+// Two modes:
+//
+//   * per_user_equal  — one PCQ queue type (pcq-rate=0) groups
+//                       every user under a single parent. Simplest,
+//                       works great for small ISPs.
+//
+//   * per_package     — one PCQ queue-type + parent tree per
+//                       package, so a "10M" user never exceeds
+//                       10M even when alone on the link but still
+//                       shares fairly with other "10M" users.
+//
+// FastTrack is enabled on established connections so the queue
+// tree doesn't force the router CPU to touch every packet.
+// ============================================================
+export async function generatePcqRsc(opts = {}) {
+  const [
+    enabled, totalDown, totalUp, parentDown, parentUp, mode, brand,
+  ] = await Promise.all([
+    settings.getSetting('provisioning.pcq_enabled'),
+    settings.getSetting('provisioning.pcq_total_download'),
+    settings.getSetting('provisioning.pcq_total_upload'),
+    settings.getSetting('provisioning.pcq_parent_download'),
+    settings.getSetting('provisioning.pcq_parent_upload'),
+    settings.getSetting('provisioning.pcq_mode'),
+    settings.getSetting('site.name'),
+  ]);
+
+  if (enabled === false || String(enabled).toLowerCase() === 'false') {
+    throw new Error('PCQ is disabled in Settings → Provisioning');
+  }
+
+  const downMbit = Math.max(1, Number(opts.total_download ?? totalDown) || 100);
+  const upMbit   = Math.max(1, Number(opts.total_upload   ?? totalUp)   || 30);
+  const pDown    = String(opts.parent_download ?? parentDown ?? 'global');
+  const pUp      = String(opts.parent_upload   ?? parentUp   ?? 'global');
+  const theMode  = String(opts.mode ?? mode ?? 'per_user_equal');
+
+  const pkgs = await db.query(
+    `SELECT code, name, service_type, rate_up_mbps, rate_down_mbps
+       FROM packages WHERE is_active = 1 ORDER BY sort_order, id`
+  );
+
+  const lines = [];
+  const out = (s = '') => lines.push(s);
+  const label = brand || 'Skynity ISP';
+  const now = new Date().toISOString();
+
+  out('# ============================================================');
+  out(`# ${label} — PCQ (fair-share) Queue Tree`);
+  out(`# Generated: ${now}`);
+  out(`# Mode: ${theMode}`);
+  out(`# Total download: ${downMbit} Mbit | Total upload: ${upMbit} Mbit`);
+  out('# ------------------------------------------------------------');
+  out('# This script creates a shared PCQ queue tree so that your');
+  out('# link bandwidth is automatically distributed among active');
+  out('# users. When some users are idle, the remaining ones get');
+  out('# a bigger slice — no manual tweaks needed.');
+  out('#');
+  out('# Re-running is safe: each item is tagged with "skynity:pcq:"');
+  out('# so you can remove the old tree before re-importing:');
+  out('#   /queue tree       remove [find comment~"skynity:pcq"]');
+  out('#   /queue type       remove [find comment~"skynity:pcq"]');
+  out('# ============================================================');
+  out('');
+
+  // FastTrack: huge CPU savings for already-established sessions.
+  out('# ---- FastTrack established connections ------------------');
+  out('/ip firewall filter');
+  out('add chain=forward action=fasttrack-connection connection-state=established,related ' +
+      'comment="skynity:pcq:fasttrack"');
+  out('add chain=forward action=accept connection-state=established,related ' +
+      'comment="skynity:pcq:accept-established"');
+  out('');
+
+  if (theMode === 'per_package') {
+    // One PCQ type per package; queue-tree children per package.
+    out('# ---- PCQ queue types (per package) ----------------------');
+    out('/queue type');
+    for (const p of pkgs) {
+      const code = mtSafe(p.code);
+      const dn = Number(p.rate_down_mbps) || 1;
+      const up = Number(p.rate_up_mbps) || 1;
+      out(`add name=pcq-dn-${code} kind=pcq pcq-classifier=dst-address pcq-rate=${dn}M ` +
+          `comment="skynity:pcq:type-dn:${rscEscape(p.code)}"`);
+      out(`add name=pcq-up-${code} kind=pcq pcq-classifier=src-address pcq-rate=${up}M ` +
+          `comment="skynity:pcq:type-up:${rscEscape(p.code)}"`);
+    }
+    out('');
+    out('# ---- Queue tree (one parent + per-package leaves) -------');
+    out('/queue tree');
+    out(`add name=skynity-total-dn parent=${pDown} max-limit=${downMbit}M ` +
+        `comment="skynity:pcq:root-dn"`);
+    out(`add name=skynity-total-up parent=${pUp} max-limit=${upMbit}M ` +
+        `comment="skynity:pcq:root-up"`);
+    for (const p of pkgs) {
+      const code = mtSafe(p.code);
+      out(`add name=skynity-dn-${code} parent=skynity-total-dn queue=pcq-dn-${code} ` +
+          `comment="skynity:pcq:leaf-dn:${rscEscape(p.code)}"`);
+      out(`add name=skynity-up-${code} parent=skynity-total-up queue=pcq-up-${code} ` +
+          `comment="skynity:pcq:leaf-up:${rscEscape(p.code)}"`);
+    }
+    out('');
+  } else {
+    // Single equal-share PCQ type for everyone.
+    out('# ---- PCQ queue types (equal share) ----------------------');
+    out('/queue type');
+    out('add name=pcq-dn kind=pcq pcq-classifier=dst-address pcq-rate=0 ' +
+        'comment="skynity:pcq:type-dn"');
+    out('add name=pcq-up kind=pcq pcq-classifier=src-address pcq-rate=0 ' +
+        'comment="skynity:pcq:type-up"');
+    out('');
+    out('# ---- Queue tree (shared) --------------------------------');
+    out('/queue tree');
+    out(`add name=skynity-total-dn parent=${pDown} queue=pcq-dn max-limit=${downMbit}M ` +
+        `comment="skynity:pcq:tree-dn"`);
+    out(`add name=skynity-total-up parent=${pUp}   queue=pcq-up max-limit=${upMbit}M ` +
+        `comment="skynity:pcq:tree-up"`);
+    out('');
+  }
+
+  out('# ============================================================');
+  out('# Tips:');
+  out('#   * If your WAN interface is NOT "global", change the');
+  out('#     parent values in Settings → Provisioning and re-download.');
+  out('#   * Use  /queue tree print stats  to watch live bandwidth.');
+  out('#   * For PPPoE-only setups, consider parent=<pppoe-out-iface>.');
+  out('# ============================================================');
+  out('');
+
+  return lines.join('\n');
+}
+
 export default {
   generateSetupRsc,
   generatePortalHtml,
+  generatePcqRsc,
 };

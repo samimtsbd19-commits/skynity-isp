@@ -278,6 +278,29 @@ export const apiNotifySendOrderCode = (data) =>
 export const apiNotifySend = (data) =>
   api.post('/notify/send', data).then((r) => r.data);
 
+// ---------- Offers (admin CRUD + broadcast) ----------
+export const apiOffers        = (all = false) =>
+  api.get('/offers', { params: { all: all ? 1 : 0 } }).then((r) => r.data.offers);
+export const apiOffer         = (id)   => api.get(`/offers/${id}`).then((r) => r.data);
+export const apiOfferCreate   = (data) => api.post('/offers', data).then((r) => r.data);
+export const apiOfferUpdate   = (id, patch) => api.patch(`/offers/${id}`, patch).then((r) => r.data);
+export const apiOfferDelete   = (id)   => api.delete(`/offers/${id}`).then((r) => r.data);
+export const apiOfferBroadcast = (id, data = {}) =>
+  api.post(`/offers/${id}/broadcast`, data).then((r) => r.data);
+
+// ---------- PCQ (shared bandwidth tree) ----------
+export async function apiGeneratePcqDownload(params = {}) {
+  const res = await api.get('/configs/generate/pcq.rsc', { params, responseType: 'blob' });
+  const blob = new Blob([res.data], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'skynity-pcq.rsc';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+export const apiGeneratePcqPreview = (params = {}) =>
+  api.get('/configs/generate/pcq-preview', { params }).then((r) => r.data);
+
 // ---------- Router CRUD ----------
 export const apiRouterCreate = (data) => api.post('/routers-admin', data).then((r) => r.data);
 export const apiRouterUpdate = (id, patch) => api.patch(`/routers-admin/${id}`, patch).then((r) => r.data);

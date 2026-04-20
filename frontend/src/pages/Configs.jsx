@@ -8,6 +8,7 @@ import {
   apiConfigs, apiConfigUpload, apiConfigDelete, apiConfigPush, apiConfigPushes,
   apiConfigDownloadUrl, apiRouters,
   apiGenerateDownload, apiGeneratePreview,
+  apiGeneratePcqDownload, apiGeneratePcqPreview,
 } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { Skeleton, EmptyState, ConfirmButton } from '../components/primitives';
@@ -53,6 +54,7 @@ export default function Configs() {
       />
       <div className="p-8 space-y-8">
         <GenerateFromPackagesCard />
+        <GeneratePcqCard />
 
         {uploading && <UploadForm onClose={() => setUploading(false)} />}
 
@@ -420,6 +422,124 @@ function Field({ label, value, onChange, hint }) {
       <input className="input mt-1.5" value={value} onChange={onChange} placeholder={hint} />
       {hint && <span className="text-[10px] text-text-mute font-mono mt-1 block">{hint}</span>}
     </label>
+  );
+}
+
+// ============================================================
+// PCQ (shared bandwidth) — auto-generated queue tree .rsc
+// ============================================================
+function GeneratePcqCard() {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({
+    total_download: '',
+    total_upload:   '',
+    parent_download: '',
+    parent_upload:   '',
+    mode:            '',
+  });
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(null);
+  const [err, setErr] = useState('');
+
+  const upd = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const clean = () => {
+    const o = {};
+    for (const [k, v] of Object.entries(form)) if (v !== '' && v != null) o[k] = v;
+    return o;
+  };
+
+  const download = async () => {
+    setErr(''); setLoading('download');
+    try { await apiGeneratePcqDownload(clean()); }
+    catch (e) { setErr(e?.response?.data?.error || e.message); }
+    finally { setLoading(null); }
+  };
+  const doPreview = async () => {
+    setErr(''); setLoading('preview');
+    try { const d = await apiGeneratePcqPreview(clean()); setPreview(d.rsc); }
+    catch (e) { setErr(e?.response?.data?.error || e.message); }
+    finally { setLoading(null); }
+  };
+
+  return (
+    <div className="panel p-6">
+      <div className="flex items-start justify-between gap-6 flex-wrap">
+        <div className="flex-1 min-w-[280px]">
+          <div className="flex items-center gap-2 mb-1">
+            <Sparkles size={14} className="text-amber" />
+            <span className="text-mono text-[10px] text-amber uppercase tracking-wider">
+              Bandwidth sharing
+            </span>
+          </div>
+          <h3 className="text-display text-2xl italic">PCQ <em>queue tree</em></h3>
+          <p className="text-text-mute text-sm mt-1 max-w-xl">
+            Auto-generate a RouterOS <code className="text-amber">.rsc</code> that installs a
+            Per-Connection-Queue (PCQ) tree. Your link bandwidth is divided <b>fairly among
+            active users</b>. Idle users' share is automatically redistributed — no cron,
+            no manual tuning. Defaults come from <b>Settings → Provisioning</b>.
+          </p>
+          <div className="text-xs text-text-mute mt-3 font-mono leading-relaxed">
+            <div>1. Download <code className="text-amber">skynity-pcq.rsc</code></div>
+            <div>2. WinBox → Files → drag it in → New Terminal:</div>
+            <div>&nbsp;&nbsp;&nbsp;<code className="text-amber">/import file-name=skynity-pcq.rsc</code></div>
+            <div>3. Watch live throughput: <code className="text-amber">/queue tree print stats</code></div>
+          </div>
+        </div>
+        <div className="flex flex-col gap-2 min-w-[220px]">
+          <button
+            onClick={download}
+            disabled={loading === 'download'}
+            className="btn btn-primary"
+          >
+            <Download size={13} /> {loading === 'download' ? 'Generating…' : 'Download pcq.rsc'}
+          </button>
+          <button onClick={doPreview} disabled={loading === 'preview'} className="btn btn-ghost">
+            <Eye size={13} /> {loading === 'preview' ? 'Loading…' : 'Preview'}
+          </button>
+          <button onClick={() => setOpen((o) => !o)} className="btn btn-ghost">
+            {open ? 'Hide' : 'Override'} defaults
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div className="mt-6 pt-6 border-t border-border-dim grid grid-cols-2 gap-4">
+          <Field label="Total download (Mbit)"  value={form.total_download}  onChange={upd('total_download')}  hint="defaults to Settings → Provisioning" />
+          <Field label="Total upload (Mbit)"    value={form.total_upload}    onChange={upd('total_upload')}    hint="defaults to Settings → Provisioning" />
+          <Field label="Parent (download)"      value={form.parent_download} onChange={upd('parent_download')} hint="global | ether1 | pppoe-out1" />
+          <Field label="Parent (upload)"        value={form.parent_upload}   onChange={upd('parent_upload')}   hint="global | ether1" />
+          <label className="block col-span-2">
+            <span className="text-mono text-[10px] text-text-mute uppercase tracking-wider">Mode</span>
+            <select className="input mt-1.5" value={form.mode} onChange={upd('mode')}>
+              <option value="">(default from settings)</option>
+              <option value="per_user_equal">Equal share — simplest (pcq-rate=0)</option>
+              <option value="per_package">Per-package — cap each tier separately</option>
+            </select>
+          </label>
+        </div>
+      )}
+
+      {err && (
+        <div className="mt-4 text-red text-xs font-mono px-3 py-2 border border-red/30 bg-red/5 rounded-sm">
+          <AlertCircle size={12} className="inline mr-1" />{err}
+        </div>
+      )}
+
+      {preview && (
+        <div className="mt-6 border border-border-dim rounded-sm overflow-hidden">
+          <div className="flex items-center border-b border-border-dim bg-surface2/50 px-4 py-2">
+            <span className="text-mono text-[11px] text-amber uppercase tracking-wider">pcq.rsc preview</span>
+            <button onClick={() => setPreview(null)} className="ml-auto text-text-mute hover:text-text">
+              <X size={14} />
+            </button>
+          </div>
+          <pre className="text-[11px] font-mono text-text-dim p-4 bg-background max-h-[400px] overflow-auto whitespace-pre-wrap break-all">
+            {preview}
+          </pre>
+        </div>
+      )}
+    </div>
   );
 }
 
