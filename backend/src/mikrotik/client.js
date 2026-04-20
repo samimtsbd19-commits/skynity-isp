@@ -79,8 +79,12 @@ export class MikrotikClient {
     return all.find((s) => s.name === name) || null;
   }
 
-  async createPppSecret({ name, password, profile, service = 'pppoe', comment }) {
-    return this.put('/ppp/secret', { name, password, profile, service, comment });
+  async createPppSecret({ name, password, profile, service = 'pppoe', comment, callerId }) {
+    const body = { name, password, profile, service, comment };
+    // RouterOS PPP MAC-binding: `caller-id` is checked against the
+    // pppoe session's source MAC. Setting this denies any other device.
+    if (callerId) body['caller-id'] = callerId;
+    return this.put('/ppp/secret', body);
   }
 
   async updatePppSecret(id, patch) {
@@ -112,10 +116,13 @@ export class MikrotikClient {
     return all.find((u) => u.name === name) || null;
   }
 
-  async createHotspotUser({ name, password, profile = 'default', comment, server }) {
+  async createHotspotUser({ name, password, profile = 'default', comment, server, macAddress }) {
     const body = { name, password, profile };
     if (comment) body.comment = comment;
     if (server) body.server = server;
+    // Hotspot MAC-binding: once set, RouterOS will reject logins
+    // from any other MAC with these credentials.
+    if (macAddress) body['mac-address'] = macAddress;
     return this.put('/ip/hotspot/user', body);
   }
 

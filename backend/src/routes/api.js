@@ -143,6 +143,110 @@ router.get('/stats', requireAdmin, async (req, res) => {
   });
 });
 
+// ============================================================
+//  GET /api/stats/revenue?days=30
+//
+//  Returns:
+//    {
+//      series:     [{ d: '2026-04-21', revenue: 1234, orders: 3 }, ...],
+//      by_package: [{ code, name, revenue, orders }, ...],
+//      by_method:  [{ method, revenue, orders }, ...],
+//      totals:     { revenue, orders, customers_new }
+//    }
+//
+//  All figures are taken from `payments` rows with status = 'verified'
+//  in the last N days (default 30, max 365). The series is densified
+//  so every day in the range has a row even when revenue is zero —
+//  much nicer for charting than sparse output.
+// ============================================================
+router.get('/stats/revenue', requireAdmin, async (req, res) => {
+  const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+
+  const [series, byPackage, byMethod, totals, newCustomers] = await Promise.all([
+    db.query(
+      `SELECT DATE(verified_at) AS d,
+              COALESCE(SUM(amount), 0) AS revenue,
+              COUNT(*) AS orders
+         FROM payments
+        WHERE status = 'verified'
+          AND verified_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+        GROUP BY DATE(verified_at)
+        ORDER BY d ASC`,
+      [days - 1]
+    ),
+    db.query(
+      `SELECT pk.code, pk.name,
+              COALESCE(SUM(pm.amount), 0) AS revenue,
+              COUNT(pm.id) AS orders
+         FROM payments pm
+         JOIN orders o  ON o.id  = pm.order_id
+         JOIN packages pk ON pk.id = o.package_id
+        WHERE pm.status = 'verified'
+          AND pm.verified_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+        GROUP BY pk.id
+        ORDER BY revenue DESC`,
+      [days - 1]
+    ),
+    db.query(
+      `SELECT method,
+              COALESCE(SUM(amount), 0) AS revenue,
+              COUNT(*) AS orders
+         FROM payments
+        WHERE status = 'verified'
+          AND verified_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+        GROUP BY method
+        ORDER BY revenue DESC`,
+      [days - 1]
+    ),
+    db.queryOne(
+      `SELECT COALESCE(SUM(amount), 0) AS revenue, COUNT(*) AS orders
+         FROM payments
+        WHERE status = 'verified'
+          AND verified_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)`,
+      [days - 1]
+    ),
+    db.queryOne(
+      `SELECT COUNT(*) AS c FROM customers
+        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)`,
+      [days - 1]
+    ),
+  ]);
+
+  // densify: turn the sparse series into one row per calendar day
+  const byDate = new Map(
+    series.map((r) => [
+      new Date(r.d).toISOString().slice(0, 10),
+      { revenue: Number(r.revenue), orders: Number(r.orders) },
+    ])
+  );
+  const dense = [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  for (let i = days - 1; i >= 0; i--) {
+    const day = new Date(today.getTime() - i * 24 * 60 * 60 * 1000);
+    const key = day.toISOString().slice(0, 10);
+    const hit = byDate.get(key);
+    dense.push({
+      d: key,
+      label: day.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
+      revenue: hit ? hit.revenue : 0,
+      orders:  hit ? hit.orders  : 0,
+    });
+  }
+
+  res.json({
+    days,
+    series: dense,
+    by_package: byPackage.map((r) => ({ ...r, revenue: Number(r.revenue), orders: Number(r.orders) })),
+    by_method:  byMethod.map((r)  => ({ ...r, revenue: Number(r.revenue), orders: Number(r.orders) })),
+    totals: {
+      revenue: Number(totals.revenue),
+      orders:  Number(totals.orders),
+      customers_new: Number(newCustomers.c),
+    },
+  });
+});
+
 // ===================== CUSTOMERS =====================
 router.get('/customers', requireAdmin, async (req, res) => {
   const { q, limit = 50, offset = 0 } = req.query;

@@ -49,6 +49,9 @@ export const apiRouters = () => api.get('/routers').then((r) => r.data.routers);
 export const apiStats = (routerId) =>
   api.get('/stats', { params: routerParams(routerId) }).then((r) => r.data);
 
+export const apiStatsRevenue = (days = 30) =>
+  api.get('/stats/revenue', { params: { days } }).then((r) => r.data);
+
 export const apiCustomers = (q, limit = 50, offset = 0) =>
   api.get('/customers', { params: { q, limit, offset } }).then((r) => r.data.customers);
 

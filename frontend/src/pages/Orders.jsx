@@ -188,6 +188,18 @@ function OrderDetail({ order, onApprove, onReject, approving, rejecting, error }
             <div className="text-sm font-mono">{order.telegram_id}</div>
           </InfoBlock>
         )}
+        {order.mac_address && (
+          <InfoBlock label="MAC address">
+            <div className="text-sm font-mono">{order.mac_address}</div>
+            <div className="text-xs text-text-mute mt-1">captured at order time</div>
+          </InfoBlock>
+        )}
+        {order.renewal_of_subscription_id && (
+          <InfoBlock label="Renewal of">
+            <div className="text-sm font-mono">#{order.renewal_of_subscription_id}</div>
+            <div className="text-xs text-amber mt-1">approving will extend this subscription</div>
+          </InfoBlock>
+        )}
       </div>
 
       {order.status === 'approved' && (

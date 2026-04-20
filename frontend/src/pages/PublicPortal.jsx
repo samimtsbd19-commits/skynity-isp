@@ -653,8 +653,18 @@ function CustomerLogin() {
                       <div className="muted" style={{ marginTop: 8 }}>Expires</div>
                       <div>{new Date(s.expires_at).toLocaleString()}</div>
                     </div>
-                    <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
-                      <Link to="/portal" className="btn btn-ghost">↻ Renew / add another package</Link>
+                    {s.mac_address && (
+                      <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
+                        {s.bind_to_mac ? '🔒 MAC-locked: ' : 'Last seen MAC: '}
+                        <code>{s.mac_address}</code>
+                      </div>
+                    )}
+                    <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <Link
+                        to={`/portal/renew?sub=${s.id}&phone=${encodeURIComponent(phone.trim())}&code=${encodeURIComponent(data.order.order_code)}`}
+                        className="btn"
+                        style={{ background: color }}
+                      >↻ Renew</Link>
                       <a
                         className="btn btn-ghost"
                         target="_blank" rel="noopener noreferrer"
@@ -709,6 +719,144 @@ function CustomerLogin() {
 }
 
 // ===================================================================
+// Page: Renew flow — /portal/renew?sub=X&phone=...&code=ORD-...
+//
+// Flow:
+//   1. User picks a package (defaults to their current one).
+//   2. We POST /portal/renewals — server creates an ORD- for the
+//      renewal linked to the existing subscription.
+//   3. We hand the created order to the shared PaymentStep.
+//   4. WaitStep polls until admin approves; CredsStep shows the
+//      extended expiry.
+// ===================================================================
+function Renew() {
+  const [params] = useSearchParams();
+  const subId = Number(params.get('sub'));
+  const phone = params.get('phone') || '';
+  const code = params.get('code') || '';
+  const info = useBranding();
+
+  const [step, setStep] = useState(1);
+  const [pkgCode, setPkgCode] = useState('');
+  const [order, setOrder] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  if (!info) return <Layout><div className="muted" style={{ textAlign: 'center' }}>Loading…</div></Layout>;
+
+  const pkgs = info.packages || [];
+  const sym = info.currency_symbol || '৳';
+  const color = info.branding?.primary_color || '#f59e0b';
+
+  if (!subId || !phone || !code) {
+    return (
+      <Layout branding={info.branding}>
+        <div className="card" style={{ textAlign: 'center' }}>
+          <div className="muted">Missing renewal context. Please log in first.</div>
+          <Link to="/portal/login" className="btn btn-ghost" style={{ marginTop: 12 }}>← Customer login</Link>
+        </div>
+      </Layout>
+    );
+  }
+
+  const startRenewal = async () => {
+    setErr(''); setBusy(true);
+    try {
+      const { data } = await api.post('/renewals', {
+        subscription_id: subId,
+        phone,
+        order_code: code,
+        package_code: pkgCode,
+      });
+      if (data.already_pending) {
+        // Jump to the wait step for the existing renewal order.
+        const { data: existing } = await api.get(`/orders/${data.order_code}`);
+        setOrder({ ...existing, order_code: data.order_code });
+        setStep(existing.status === 'payment_submitted' ? 3 : 2);
+      } else {
+        setOrder(data);
+        setStep(2);
+      }
+    } catch (ex) {
+      setErr(ex?.response?.data?.error || ex.message);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Layout branding={info.branding}>
+      <div className="card">
+        <div className="kicker">Renew subscription</div>
+        <h2 style={{ margin: '4px 0 16px' }}>
+          Extend your <em style={{ color }}>WiFi plan</em>
+        </h2>
+
+        <div className="step-dots">
+          <span className={step >= 1 ? 'on' : ''} />
+          <span className={step >= 2 ? 'on' : ''} />
+          <span className={step >= 3 ? 'on' : ''} />
+          <span className={step >= 4 ? 'on' : ''} />
+        </div>
+
+        {step === 1 && (
+          <>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Pick the package you want. Your current credentials stay the same — only the expiry gets extended.
+            </p>
+            <div className="grid" style={{ marginTop: 8 }}>
+              {pkgs.map((p) => (
+                <button
+                  key={p.code}
+                  onClick={() => setPkgCode(p.code)}
+                  className={`pkg ${pkgCode === p.code ? 'sel' : ''}`}
+                  style={{ textAlign: 'left', color: 'inherit', font: 'inherit' }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <span className={`tag tag-${p.service_type}`}>{p.service_type}</span>
+                    <span style={{ fontWeight: 700, color }}>{sym}{Number(p.price).toFixed(0)}</span>
+                  </div>
+                  <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{p.name}</div>
+                  <div className="muted">{Number(p.rate_down_mbps)} Mbps · {Number(p.duration_days)} days</div>
+                </button>
+              ))}
+            </div>
+            {err && <div className="err">{err}</div>}
+            <button
+              onClick={startRenewal}
+              className="btn"
+              disabled={busy || !pkgCode}
+              style={{ marginTop: 16 }}
+            >
+              {busy ? 'Creating…' : 'Continue to payment →'}
+            </button>
+          </>
+        )}
+
+        {step === 2 && order && (
+          <PaymentStep
+            order={order}
+            branding={info.branding}
+            sym={sym}
+            onSubmitted={() => setStep(3)}
+          />
+        )}
+
+        {step === 3 && order && (
+          <WaitStep orderCode={order.order_code} onApproved={() => setStep(4)} onDone={setOrder} />
+        )}
+
+        {step === 4 && order?.subscription && (
+          <CredsStep order={order} />
+        )}
+
+        <div style={{ marginTop: 16 }}>
+          <Link to={`/portal/login`} className="btn btn-ghost">← Back to my account</Link>
+        </div>
+      </div>
+    </Layout>
+  );
+}
+
+// ===================================================================
 // Root component — owns its own BrowserRouter so it can be mounted
 // completely outside the admin app.
 // ===================================================================
@@ -718,6 +866,7 @@ export default function PublicPortal() {
       <Route path="/" element={<Landing />} />
       <Route path="/order" element={<OrderFlow />} />
       <Route path="/redeem" element={<Redeem />} />
+      <Route path="/renew" element={<Renew />} />
       <Route path="/login" element={<CustomerLogin />} />
       <Route path="/status" element={<StatusLookup />} />
       <Route path="/status/:code" element={<StatusLookup />} />

@@ -19,6 +19,8 @@ import db from '../database/pool.js';
 import { getMikrotikClient } from '../mikrotik/client.js';
 import { randomUsername, randomPassword } from '../utils/crypto.js';
 import { findOrCreateCustomer } from './provisioning.js';
+import { normaliseMac } from '../utils/mac.js';
+import { getSetting } from './settings.js';
 import logger from '../utils/logger.js';
 
 const CODE_ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // readable only
@@ -123,7 +125,7 @@ export async function deleteBatch(batchId) {
 // ------------------------------------------------------------
 // Redeem — public/portal flow
 // ------------------------------------------------------------
-export async function redeemVoucher({ code, fullName, phone }) {
+export async function redeemVoucher({ code, fullName, phone, mac }) {
   const cleanCode = String(code || '').toUpperCase().trim();
   if (!cleanCode) throw new Error('code required');
 
@@ -145,6 +147,9 @@ export async function redeemVoucher({ code, fullName, phone }) {
 
   const login = await generateUniqueLogin(voucher.service_type);
   const password = randomPassword(10);
+  const cleanMac = normaliseMac(mac);
+  const bindDefault = !!(await getSetting('provisioning.bind_to_mac_default'));
+  const bindThis = !!(cleanMac && bindDefault);
 
   const router = await db.queryOne(
     'SELECT id FROM mikrotik_routers WHERE is_default = 1 AND is_active = 1 LIMIT 1'
@@ -161,9 +166,14 @@ export async function redeemVoucher({ code, fullName, phone }) {
   const subRes = await db.query(
     `INSERT INTO subscriptions
        (customer_id, package_id, router_id, service_type, login_username, login_password,
+        mac_address, bind_to_mac,
         starts_at, expires_at, status, mt_synced)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', 0)`,
-    [customer.id, voucher.pkg_id, useRouterId, voucher.service_type, login, password, now, expires]
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 0)`,
+    [
+      customer.id, voucher.pkg_id, useRouterId, voucher.service_type, login, password,
+      cleanMac, bindThis ? 1 : 0,
+      now, expires,
+    ]
   );
   const subscriptionId = subRes.insertId;
 
@@ -172,11 +182,17 @@ export async function redeemVoucher({ code, fullName, phone }) {
   let mtError  = null;
   try {
     const mt = await getMikrotikClient(useRouterId);
-    const comment = `SKYNITY: voucher=${cleanCode} / pkg=${voucher.pkg_code}`;
+    const comment = `SKYNITY: voucher=${cleanCode} / pkg=${voucher.pkg_code}${bindThis ? ` / mac=${cleanMac}` : ''}`;
     if (voucher.service_type === 'pppoe') {
-      await mt.createPppSecret({ name: login, password, profile: voucher.mikrotik_profile, service: 'pppoe', comment });
+      await mt.createPppSecret({
+        name: login, password, profile: voucher.mikrotik_profile, service: 'pppoe', comment,
+        callerId: bindThis ? cleanMac : undefined,
+      });
     } else {
-      await mt.createHotspotUser({ name: login, password, profile: voucher.mikrotik_profile, comment });
+      await mt.createHotspotUser({
+        name: login, password, profile: voucher.mikrotik_profile, comment,
+        macAddress: bindThis ? cleanMac : undefined,
+      });
     }
     mtSynced = true;
   } catch (err) {
@@ -192,9 +208,9 @@ export async function redeemVoucher({ code, fullName, phone }) {
   await db.query(
     `UPDATE vouchers
        SET is_redeemed = 1, redeemed_by_customer_id = ?, redeemed_by_subscription_id = ?,
-           redeemed_by_phone = ?, redeemed_at = NOW()
+           redeemed_by_phone = ?, mac_address = ?, redeemed_at = NOW()
      WHERE id = ?`,
-    [customer.id, subscriptionId, customer.phone, voucher.id]
+    [customer.id, subscriptionId, customer.phone, cleanMac, voucher.id]
   );
 
   await db.query(

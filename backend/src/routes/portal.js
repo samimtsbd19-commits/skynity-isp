@@ -41,6 +41,7 @@ import * as settings from '../services/settings.js';
 import { notifyAdmins } from '../telegram/bot.js';
 import vouchers from '../services/vouchers.js';
 import { renderInvoiceForOrder } from '../services/invoice.js';
+import { normaliseMac } from '../utils/mac.js';
 
 const router = Router();
 
@@ -189,18 +190,19 @@ router.post('/orders', postLimiter, async (req, res) => {
     );
     if (!pkg) return res.status(404).json({ error: 'package not found' });
 
+    const cleanMac = normaliseMac(mac);
     const orderCode = genOrderCode();
     const r = await db.query(
       `INSERT INTO orders
-         (order_code, package_id, full_name, phone, amount, status)
-       VALUES (?, ?, ?, ?, ?, 'pending_payment')`,
-      [orderCode, pkg.id, String(full_name).trim().slice(0, 100), cleanPhone, pkg.price]
+         (order_code, package_id, full_name, phone, mac_address, amount, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending_payment')`,
+      [orderCode, pkg.id, String(full_name).trim().slice(0, 100), cleanPhone, cleanMac, pkg.price]
     );
 
     await db.query(
       `INSERT INTO activity_log (actor_type, actor_id, action, entity_type, entity_id, meta, ip_address)
        VALUES ('customer', ?, 'portal_order_created', 'order', ?, ?, ?)`,
-      [cleanPhone, String(r.insertId), JSON.stringify({ package: pkg.code, mac: mac || null }), clientIp(req)]
+      [cleanPhone, String(r.insertId), JSON.stringify({ package: pkg.code, mac: cleanMac }), clientIp(req)]
     );
 
     const pay = await paymentInfo();
@@ -330,7 +332,7 @@ router.get('/orders/:code', getLimiter, async (req, res) => {
 // ============================================================
 router.post('/vouchers/redeem', postLimiter, async (req, res) => {
   try {
-    const { code, full_name, phone } = req.body || {};
+    const { code, full_name, phone, mac } = req.body || {};
     if (!code || String(code).trim().length < 4) {
       return res.status(400).json({ error: 'voucher code required' });
     }
@@ -338,6 +340,7 @@ router.post('/vouchers/redeem', postLimiter, async (req, res) => {
       code: String(code).trim(),
       fullName: full_name,
       phone: phone,
+      mac,
     });
 
     await db.query(
@@ -431,6 +434,7 @@ router.post('/customer/login', postLimiter, async (req, res) => {
       ? await db.query(
           `SELECT s.id, s.login_username, s.login_password, s.starts_at, s.expires_at,
                   s.status, s.service_type, s.mt_synced,
+                  s.mac_address, s.bind_to_mac,
                   p.name AS package_name, p.code AS package_code,
                   p.rate_down_mbps, p.rate_up_mbps, p.duration_days, p.price
              FROM subscriptions s JOIN packages p ON p.id = s.package_id
@@ -456,7 +460,103 @@ router.post('/customer/login', postLimiter, async (req, res) => {
 });
 
 // ============================================================
-// 8) GET /portal/orders/:code/invoice?phone=01xx
+// 8) POST /portal/renewals
+//     body: { phone, order_code, subscription_id, package_code }
+//
+//     Create a renewal order for an existing subscription. Identity
+//     is proved by the pairing of the customer's phone with any
+//     order_code that belongs to them. The renewal order re-uses the
+//     existing subscription so admin approval just extends expiry.
+// ============================================================
+router.post('/renewals', postLimiter, async (req, res) => {
+  try {
+    const phone = normalisePhone(req.body?.phone);
+    const orderCode = String(req.body?.order_code || '').toUpperCase().trim();
+    const subscriptionId = Number(req.body?.subscription_id);
+    const packageCode = String(req.body?.package_code || '').trim();
+
+    if (!phone || !orderCode || !subscriptionId || !packageCode) {
+      return res.status(400).json({ error: 'phone, order_code, subscription_id and package_code are required' });
+    }
+
+    // identity check: does this phone own an order with that code?
+    const proof = await db.queryOne(
+      'SELECT customer_id FROM orders WHERE order_code = ? AND phone = ?',
+      [orderCode, phone]
+    );
+    if (!proof) return res.status(404).json({ error: 'cannot verify — phone and order code do not match' });
+
+    // the subscription must belong to the same customer
+    const sub = await db.queryOne(
+      `SELECT s.id, s.customer_id, s.package_id, s.service_type, s.login_username,
+              s.expires_at, s.status, c.phone
+         FROM subscriptions s
+         JOIN customers c ON c.id = s.customer_id
+        WHERE s.id = ?`,
+      [subscriptionId]
+    );
+    if (!sub) return res.status(404).json({ error: 'subscription not found' });
+    if (sub.customer_id !== proof.customer_id) {
+      return res.status(403).json({ error: 'this subscription does not belong to the provided order' });
+    }
+
+    // target package (can be same or an upgrade)
+    const pkg = await db.queryOne(
+      'SELECT id, code, name, price, service_type FROM packages WHERE code = ? AND is_active = 1',
+      [packageCode]
+    );
+    if (!pkg) return res.status(404).json({ error: 'package not found or inactive' });
+
+    // Bail out if user already has an open renewal order queued.
+    const existing = await db.queryOne(
+      `SELECT id, order_code FROM orders
+        WHERE renewal_of_subscription_id = ?
+          AND status IN ('pending_payment', 'payment_submitted')
+        ORDER BY id DESC LIMIT 1`,
+      [subscriptionId]
+    );
+    if (existing) {
+      return res.status(200).json({
+        ok: true,
+        already_pending: true,
+        order_code: existing.order_code,
+      });
+    }
+
+    const newCode = genOrderCode();
+    const r = await db.query(
+      `INSERT INTO orders
+         (order_code, package_id, customer_id, full_name, phone, amount,
+          renewal_of_subscription_id, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_payment')`,
+      [newCode, pkg.id, proof.customer_id, '(renewal)', phone, pkg.price, subscriptionId]
+    );
+
+    await db.query(
+      `INSERT INTO activity_log (actor_type, actor_id, action, entity_type, entity_id, meta, ip_address)
+       VALUES ('customer', ?, 'portal_renewal_created', 'order', ?, ?, ?)`,
+      [phone, String(r.insertId), JSON.stringify({ subscriptionId, package: pkg.code }), clientIp(req)]
+    );
+
+    const pay = await paymentInfo();
+    res.json({
+      ok: true,
+      order_code: newCode,
+      order_id: r.insertId,
+      amount: Number(pkg.price),
+      package: { code: pkg.code, name: pkg.name, service_type: pkg.service_type },
+      renewal_of: { id: sub.id, login_username: sub.login_username, current_expires_at: sub.expires_at },
+      payment: { bkash: pay.bkash, nagad: pay.nagad },
+      currency_symbol: pay.currency_symbol,
+    });
+  } catch (err) {
+    logger.error({ err }, 'portal renewal failed');
+    res.status(500).json({ error: err.message || 'internal error' });
+  }
+});
+
+// ============================================================
+// 9) GET /portal/orders/:code/invoice?phone=01xx
 //    Public invoice — phone must match the one on the order.
 // ============================================================
 router.get('/orders/:code/invoice', getLimiter, async (req, res) => {

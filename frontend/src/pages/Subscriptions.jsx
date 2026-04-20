@@ -88,6 +88,16 @@ export default function Subscriptions() {
                       </div>
                       <div className="col-span-2">
                         <code className="text-mono text-sm text-text-dim">{s.login_username}</code>
+                        {s.mac_address && (
+                          <div
+                            className="text-mono text-[10px] mt-0.5"
+                            title={s.bind_to_mac ? 'MAC-locked on MikroTik' : 'Last seen MAC'}
+                          >
+                            <span className={s.bind_to_mac ? 'text-amber' : 'text-text-mute'}>
+                              {s.bind_to_mac ? '🔒 ' : ''}{s.mac_address}
+                            </span>
+                          </div>
+                        )}
                       </div>
                       <div className="col-span-2 text-sm truncate">{s.package_name}</div>
                       <div className="col-span-2">

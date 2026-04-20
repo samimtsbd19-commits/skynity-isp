@@ -1,31 +1,39 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
-  Users, Wallet, Activity, Inbox, Clock, Signal, Wifi, AlertTriangle,
+  Wallet, Activity, Inbox, Clock, Signal, Wifi, AlertTriangle,
 } from 'lucide-react';
 import {
   AreaChart, Area, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
-import { apiStats, apiOrders, apiMikrotikInfo, apiMikrotikActive } from '../api/client';
+import {
+  apiStats, apiStatsRevenue, apiOrders, apiMikrotikInfo, apiMikrotikActive,
+} from '../api/client';
 import { useSelectedRouter } from '../contexts/RouterContext';
 import { StatCard, StatusPill, EmptyState } from '../components/primitives';
 import { PageHeader } from '../components/PageHeader';
 import { formatDistanceToNow } from 'date-fns';
 
-// fake revenue trend for now; will be real historical once Phase 4 analytics is in
-function useSampleTrend() {
-  return Array.from({ length: 14 }, (_, i) => ({
-    d: i,
-    v: Math.round(1000 + Math.random() * 3000 + i * 120),
-  }));
-}
+const RANGE_OPTIONS = [
+  { days: 7,  label: '7d' },
+  { days: 30, label: '30d' },
+  { days: 90, label: '90d' },
+];
 
 export default function Dashboard() {
   const { routerId } = useSelectedRouter();
+  const [days, setDays] = useState(30);
+
   const { data: stats, isLoading } = useQuery({
     queryKey: ['stats', routerId],
     queryFn: () => apiStats(routerId),
     refetchInterval: 30_000,
+  });
+  const { data: revenue, isLoading: revLoading } = useQuery({
+    queryKey: ['stats-revenue', days],
+    queryFn: () => apiStatsRevenue(days),
+    refetchInterval: 60_000,
   });
   const { data: pending } = useQuery({
     queryKey: ['orders', 'payment_submitted'],
@@ -43,7 +51,7 @@ export default function Dashboard() {
     retry: false, refetchInterval: 15_000,
   });
 
-  const trend = useSampleTrend();
+  const trend = revenue?.series || [];
   const now = new Date();
 
   const currencyFmt = (n) =>
@@ -125,50 +133,80 @@ export default function Dashboard() {
             <div className="flex items-baseline justify-between mb-5">
               <div>
                 <div className="text-mono text-[10px] text-amber uppercase tracking-[0.2em]">
-                  Revenue · 14 days
+                  Revenue · {days} days
                 </div>
                 <div className="text-display text-3xl mt-1 italic">
-                  {currencyFmt(stats?.totalRevenue)}
+                  {currencyFmt(revenue?.totals?.revenue)}
                 </div>
-                <div className="text-text-mute text-xs mt-1">All-time verified</div>
+                <div className="text-text-mute text-xs mt-1">
+                  {revenue?.totals?.orders ?? 0} verified payments · {revenue?.totals?.customers_new ?? 0} new customers
+                </div>
               </div>
-              <div className="text-right">
-                <div className="text-mono text-[10px] text-text-mute uppercase tracking-wider">Customers</div>
-                <div className="text-display text-2xl">{stats?.customers ?? '—'}</div>
+              <div className="flex items-center gap-1">
+                {RANGE_OPTIONS.map((r) => (
+                  <button
+                    key={r.days}
+                    onClick={() => setDays(r.days)}
+                    className={`px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider rounded-sm ${
+                      days === r.days
+                        ? 'bg-amber text-black'
+                        : 'text-text-dim hover:text-text hover:bg-surface2'
+                    }`}
+                  >{r.label}</button>
+                ))}
               </div>
             </div>
             <div className="h-52 -mx-2">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={trend} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%"   stopColor="#f59e0b" stopOpacity={0.4}/>
-                      <stop offset="100%" stopColor="#f59e0b" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="2 4" stroke="#26262b" vertical={false} />
-                  <XAxis dataKey="d" hide />
-                  <YAxis hide />
-                  <Tooltip
-                    cursor={{ stroke: '#f59e0b', strokeOpacity: 0.2 }}
-                    contentStyle={{
-                      background: '#131316', border: '1px solid #26262b',
-                      borderRadius: 2, fontSize: 12, fontFamily: 'JetBrains Mono',
-                    }}
-                    labelStyle={{ color: '#8c8a85' }}
-                    formatter={(v) => [currencyFmt(v), 'Revenue']}
-                  />
-                  <Area
-                    type="monotone" dataKey="v"
-                    stroke="#f59e0b" strokeWidth={1.5}
-                    fill="url(#revGrad)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+              {revLoading ? (
+                <div className="h-full flex items-center justify-center text-text-mute text-xs font-mono">
+                  Loading…
+                </div>
+              ) : !trend.length || revenue?.totals?.revenue === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-text-mute text-xs">
+                  <div className="font-mono uppercase tracking-wider">no verified payments yet</div>
+                  <div className="mt-1 opacity-70">approve an order to see the curve fill in</div>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={trend} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%"   stopColor="#f59e0b" stopOpacity={0.4}/>
+                        <stop offset="100%" stopColor="#f59e0b" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="2 4" stroke="#26262b" vertical={false} />
+                    <XAxis
+                      dataKey="label"
+                      tickLine={false}
+                      axisLine={false}
+                      interval="preserveStartEnd"
+                      minTickGap={24}
+                      tick={{ fill: '#78787e', fontSize: 10, fontFamily: 'JetBrains Mono' }}
+                    />
+                    <YAxis hide />
+                    <Tooltip
+                      cursor={{ stroke: '#f59e0b', strokeOpacity: 0.2 }}
+                      contentStyle={{
+                        background: '#131316', border: '1px solid #26262b',
+                        borderRadius: 2, fontSize: 12, fontFamily: 'JetBrains Mono',
+                      }}
+                      labelStyle={{ color: '#8c8a85' }}
+                      formatter={(v, _n, item) => [currencyFmt(v), `Revenue · ${item?.payload?.orders ?? 0} orders`]}
+                      labelFormatter={(l) => l}
+                    />
+                    <Area
+                      type="monotone" dataKey="revenue"
+                      stroke="#f59e0b" strokeWidth={1.5}
+                      fill="url(#revGrad)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
             </div>
             <div className="pt-4 mt-4 border-t border-border-dim flex items-center justify-between text-xs text-text-mute font-mono">
-              <span>14d ago</span>
-              <span className="italic">— sample trend; live data in Phase 4 —</span>
+              <span>{days}d ago</span>
+              <span>All-time: {currencyFmt(stats?.totalRevenue)}</span>
               <span>today</span>
             </div>
           </div>
@@ -205,6 +243,26 @@ export default function Dashboard() {
             </div>
           </div>
         </section>
+
+        {/* BREAKDOWNS */}
+        {(revenue?.by_package?.length || revenue?.by_method?.length) ? (
+          <section className="grid md:grid-cols-2 gap-6">
+            <BreakdownCard
+              title="Revenue by package"
+              rows={revenue?.by_package || []}
+              nameKey="name"
+              total={revenue?.totals?.revenue}
+              currencyFmt={currencyFmt}
+            />
+            <BreakdownCard
+              title="Revenue by method"
+              rows={revenue?.by_method || []}
+              nameKey="method"
+              total={revenue?.totals?.revenue}
+              currencyFmt={currencyFmt}
+            />
+          </section>
+        ) : null}
 
         {/* PENDING QUEUE */}
         <section>
@@ -255,6 +313,48 @@ export default function Dashboard() {
           )}
         </section>
       </div>
+    </div>
+  );
+}
+
+function BreakdownCard({ title, rows, nameKey, total, currencyFmt }) {
+  const safeTotal = Math.max(1, Number(total) || 0);
+  return (
+    <div className="panel p-6">
+      <div className="section-rule mb-5">
+        <span className="text-mono text-[10px] text-amber uppercase tracking-[0.2em]">
+          {title}
+        </span>
+      </div>
+      {!rows.length ? (
+        <div className="text-text-mute text-xs font-mono py-6 text-center">
+          No data in this window
+        </div>
+      ) : (
+        <ul className="space-y-3">
+          {rows.slice(0, 6).map((r, i) => {
+            const pct = Math.round(((Number(r.revenue) || 0) / safeTotal) * 100);
+            const name = String(r[nameKey] || '—').toUpperCase();
+            return (
+              <li key={`${name}-${i}`}>
+                <div className="flex items-baseline justify-between text-xs font-mono mb-1">
+                  <span className="text-text">{name}</span>
+                  <span className="text-amber">{currencyFmt(r.revenue)}</span>
+                </div>
+                <div className="h-1 bg-surface2 rounded-sm overflow-hidden">
+                  <div
+                    className="h-full bg-amber"
+                    style={{ width: `${Math.min(100, Math.max(2, pct))}%` }}
+                  />
+                </div>
+                <div className="text-[10px] text-text-mute font-mono mt-1">
+                  {r.orders ?? 0} orders · {pct}%
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }
