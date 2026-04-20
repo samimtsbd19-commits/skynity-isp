@@ -2,10 +2,12 @@ import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   FileCode, Upload, Download, Send, Trash2, History, X, Check, AlertCircle,
+  Sparkles, Eye,
 } from 'lucide-react';
 import {
   apiConfigs, apiConfigUpload, apiConfigDelete, apiConfigPush, apiConfigPushes,
   apiConfigDownloadUrl, apiRouters,
+  apiGenerateDownload, apiGeneratePreview,
 } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { Skeleton, EmptyState, ConfirmButton } from '../components/primitives';
@@ -42,12 +44,16 @@ export default function Configs() {
         title={<>Config <em>files</em></>}
         subtitle="Upload RouterOS .rsc / .backup / .conf files here. Push them to any router via REST — no Winbox needed."
         actions={
-          <button onClick={() => setUploading(true)} className="btn btn-primary">
-            <Upload size={14} /> Upload file
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setUploading(true)} className="btn btn-ghost">
+              <Upload size={14} /> Upload file
+            </button>
+          </div>
         }
       />
-      <div className="p-8">
+      <div className="p-8 space-y-8">
+        <GenerateFromPackagesCard />
+
         {uploading && <UploadForm onClose={() => setUploading(false)} />}
 
         {isLoading ? (
@@ -265,6 +271,155 @@ function UploadForm({ onClose }) {
         </div>
       </form>
     </div>
+  );
+}
+
+// ============================================================
+// Generate MikroTik artefacts from current packages / settings
+// ============================================================
+function GenerateFromPackagesCard() {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({
+    hotspot_interface: 'bridge-hotspot',
+    hotspot_network:   '10.77.0.0/24',
+    hotspot_gateway:   '10.77.0.1',
+    dns_name:          'wifi.local',
+    vps_host:          '',
+    vps_ip:            '',
+  });
+  const [preview, setPreview] = useState(null);
+  const [loadingKind, setLoadingKind] = useState(null);
+  const [previewTab, setPreviewTab] = useState('rsc');
+
+  const updateField = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const cleanParams = () => {
+    const out = {};
+    for (const [k, v] of Object.entries(form)) {
+      if (v !== '' && v != null) out[k] = v;
+    }
+    return out;
+  };
+
+  const download = async (kind) => {
+    setLoadingKind(kind);
+    try {
+      await apiGenerateDownload(kind, cleanParams());
+    } catch (err) {
+      alert(err?.response?.data?.error || err.message);
+    } finally {
+      setLoadingKind(null);
+    }
+  };
+
+  const doPreview = async () => {
+    setLoadingKind('preview');
+    try {
+      const data = await apiGeneratePreview(cleanParams());
+      setPreview(data);
+    } catch (err) {
+      alert(err?.response?.data?.error || err.message);
+    } finally {
+      setLoadingKind(null);
+    }
+  };
+
+  return (
+    <div className="panel p-6">
+      <div className="flex items-start justify-between gap-6 flex-wrap">
+        <div className="flex-1 min-w-[280px]">
+          <div className="flex items-center gap-2 mb-1">
+            <Sparkles size={14} className="text-amber" />
+            <span className="text-mono text-[10px] text-amber uppercase tracking-wider">Auto-generate</span>
+          </div>
+          <h3 className="text-display text-2xl italic">
+            MikroTik <em>setup files</em>
+          </h3>
+          <p className="text-text-mute text-sm mt-1 max-w-xl">
+            Download a ready-to-import <code className="text-amber">.rsc</code> that configures
+            hotspot profiles, PPP profiles, walled-garden and firewall NAT — straight from
+            your active packages. Then download a captive-portal <code className="text-amber">login.html</code>
+            {' '}that shows the same packages to WiFi users.
+          </p>
+          <div className="text-xs text-text-mute mt-3 font-mono leading-relaxed">
+            <div>1. WinBox → <b className="text-text-dim">Files</b> → drag the .rsc in</div>
+            <div>2. New terminal → <code className="text-amber">/import file-name=skynity-setup.rsc</code></div>
+            <div>3. Upload <code className="text-amber">login.html</code> to <code className="text-amber">flash/skynity-hotspot/</code></div>
+          </div>
+        </div>
+        <div className="flex flex-col gap-2 min-w-[220px]">
+          <button
+            onClick={() => download('setup.rsc')}
+            disabled={loadingKind === 'setup.rsc'}
+            className="btn btn-primary"
+          >
+            <Download size={13} /> {loadingKind === 'setup.rsc' ? 'Generating…' : 'Download setup.rsc'}
+          </button>
+          <button
+            onClick={() => download('login.html')}
+            disabled={loadingKind === 'login.html'}
+            className="btn btn-ghost"
+          >
+            <Download size={13} /> {loadingKind === 'login.html' ? 'Generating…' : 'Download login.html'}
+          </button>
+          <button
+            onClick={() => setOpen((o) => !o)}
+            className="btn btn-ghost"
+          >
+            {open ? 'Hide' : 'Show'} advanced options
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div className="mt-6 pt-6 border-t border-border-dim grid grid-cols-2 gap-4">
+          <Field label="Hotspot interface" value={form.hotspot_interface} onChange={updateField('hotspot_interface')} hint="bridge-hotspot / ether2 / wlan1" />
+          <Field label="DNS name" value={form.dns_name} onChange={updateField('dns_name')} hint="wifi.local" />
+          <Field label="Hotspot network" value={form.hotspot_network} onChange={updateField('hotspot_network')} hint="10.77.0.0/24" />
+          <Field label="Gateway IP" value={form.hotspot_gateway} onChange={updateField('hotspot_gateway')} hint="10.77.0.1" />
+          <Field label="VPS hostname" value={form.vps_host} onChange={updateField('vps_host')} hint="auto-detected from settings" />
+          <Field label="VPS IP (optional)" value={form.vps_ip} onChange={updateField('vps_ip')} hint="extra walled-garden entry" />
+          <div className="col-span-2">
+            <button onClick={doPreview} disabled={loadingKind === 'preview'} className="btn btn-ghost">
+              <Eye size={13} /> {loadingKind === 'preview' ? 'Loading…' : 'Preview output'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {preview && (
+        <div className="mt-6 border border-border-dim rounded-sm overflow-hidden">
+          <div className="flex border-b border-border-dim bg-surface2/50">
+            <button
+              onClick={() => setPreviewTab('rsc')}
+              className={`px-4 py-2 text-xs font-mono uppercase tracking-wider ${previewTab === 'rsc' ? 'text-amber border-b-2 border-amber' : 'text-text-mute'}`}
+            >
+              setup.rsc
+            </button>
+            <button
+              onClick={() => setPreviewTab('html')}
+              className={`px-4 py-2 text-xs font-mono uppercase tracking-wider ${previewTab === 'html' ? 'text-amber border-b-2 border-amber' : 'text-text-mute'}`}
+            >
+              login.html
+            </button>
+            <button onClick={() => setPreview(null)} className="ml-auto px-4 text-text-mute hover:text-text"><X size={14} /></button>
+          </div>
+          <pre className="text-[11px] font-mono text-text-dim p-4 bg-background max-h-[400px] overflow-auto whitespace-pre-wrap break-all">
+            {previewTab === 'rsc' ? preview.rsc : preview.html}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, value, onChange, hint }) {
+  return (
+    <label className="block">
+      <span className="text-mono text-[10px] text-text-mute uppercase tracking-wider">{label}</span>
+      <input className="input mt-1.5" value={value} onChange={onChange} placeholder={hint} />
+      {hint && <span className="text-[10px] text-text-mute font-mono mt-1 block">{hint}</span>}
+    </label>
   );
 }
 

@@ -11,8 +11,70 @@ import { requireAdmin, requireRole } from '../middleware/auth.js';
 import config from '../config/index.js';
 import * as svc from '../services/configFiles.js';
 import * as settings from '../services/settings.js';
+import * as gen from '../services/configGenerator.js';
 
 const router = Router();
+
+// ============================================================
+// Auto-generate artefacts from current DB state
+// ------------------------------------------------------------
+// These two endpoints do NOT store anything — they render the
+// file fresh every time, based on the packages / settings /
+// brand configured in the dashboard. The admin downloads the
+// result and uploads it to MikroTik (WinBox Files tab).
+// ============================================================
+
+/** GET /api/configs/generate/setup.rsc?hotspot_interface=...&hotspot_network=... */
+router.get('/generate/setup.rsc', requireAdmin, async (req, res) => {
+  try {
+    const body = await gen.generateSetupRsc({
+      hotspotInterface: req.query.hotspot_interface || 'bridge-hotspot',
+      hotspotNetwork:   req.query.hotspot_network   || '10.77.0.0/24',
+      hotspotGateway:   req.query.hotspot_gateway   || '10.77.0.1',
+      dnsName:          req.query.dns_name          || 'wifi.local',
+      vpsHost:          req.query.vps_host          || undefined,
+      vpsIp:            req.query.vps_ip            || undefined,
+    });
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment; filename="skynity-setup.rsc"');
+    res.send(body);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/configs/generate/login.html  — captive portal page */
+router.get('/generate/login.html', requireAdmin, async (req, res) => {
+  try {
+    const body = await gen.generatePortalHtml({
+      vpsHost: req.query.vps_host || undefined,
+    });
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment; filename="login.html"');
+    res.send(body);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/configs/generate/preview — returns both as JSON (for in-app preview) */
+router.get('/generate/preview', requireAdmin, async (req, res) => {
+  try {
+    const [rsc, html] = await Promise.all([
+      gen.generateSetupRsc({
+        hotspotInterface: req.query.hotspot_interface || 'bridge-hotspot',
+        hotspotNetwork:   req.query.hotspot_network   || '10.77.0.0/24',
+        hotspotGateway:   req.query.hotspot_gateway   || '10.77.0.1',
+        dnsName:          req.query.dns_name          || 'wifi.local',
+        vpsHost:          req.query.vps_host          || undefined,
+      }),
+      gen.generatePortalHtml({ vpsHost: req.query.vps_host || undefined }),
+    ]);
+    res.json({ rsc, html });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Multer storage: UPLOAD_DIR/configs/<timestamp>-<sanitized-name>
 await svc.ensureConfigDir();

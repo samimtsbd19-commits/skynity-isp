@@ -98,6 +98,27 @@ export const apiConfigPushes = (id) =>
   api.get(`/configs/${id}/pushes`).then((r) => r.data.pushes);
 export const apiConfigDownloadUrl = (id) => `/api/configs/${id}/raw`;
 
+// ---------- Generate MikroTik artefacts from DB (.rsc + login.html) ----------
+export const apiGeneratePreview = (params = {}) =>
+  api.get('/configs/generate/preview', { params }).then((r) => r.data);
+
+export async function apiGenerateDownload(kind, params = {}) {
+  // kind = 'setup.rsc' | 'login.html'
+  const res = await api.get(`/configs/generate/${kind}`, {
+    params,
+    responseType: 'blob',
+  });
+  const blob = new Blob([res.data], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = kind === 'setup.rsc' ? 'skynity-setup.rsc' : 'login.html';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 // ---------- VPN ----------
 export const apiVpnTunnels = (params = {}) =>
   api.get('/vpn/tunnels', { params }).then((r) => r.data.tunnels);
