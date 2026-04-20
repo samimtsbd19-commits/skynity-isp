@@ -1,40 +1,59 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Inbox, Package, Radio,
   Activity, Router as RouterIcon, LogOut, Satellite,
   ScrollText, Settings, FileCode, Shield, Terminal,
-  RefreshCw, UserCog, Cog, Ticket,
+  RefreshCw, UserCog, Cog, Ticket, ChevronDown, UserCheck,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
 import { useSelectedRouter } from '../contexts/RouterContext';
 import { apiStats, apiSettings } from '../api/client';
 import clsx from 'clsx';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
-// Sidebar navigation. Grouped by purpose:
-//   - customer lifecycle   (Overview, Orders, Customers, Subscriptions, Vouchers)
-//   - network operations   (Live Sessions, Packages, Routers, Configs, VPN, Scripts, Updates)
-//   - admin / plumbing     (Admin users, System, Activity, Profile)
-const nav = [
-  { to: '/',              label: 'Overview',      icon: LayoutDashboard, end: true },
-  { to: '/orders',        label: 'Orders',        icon: Inbox,           badge: 'pending' },
-  { to: '/customers',     label: 'Customers',     icon: Users },
-  { to: '/subscriptions', label: 'Subscriptions', icon: Activity },
-  { to: '/vouchers',      label: 'Vouchers',      icon: Ticket },
-
-  { to: '/monitoring', label: 'Live Sessions', icon: Radio,    section: 'Network' },
-  { to: '/packages',   label: 'Packages',      icon: Package },
-  { to: '/routers',    label: 'Routers',       icon: RouterIcon },
-  { to: '/configs',    label: 'Configs',       icon: FileCode },
-  { to: '/vpn',        label: 'VPN',           icon: Shield },
-  { to: '/scripts',    label: 'Scripts',       icon: Terminal },
-  { to: '/updates',    label: 'Updates',       icon: RefreshCw },
-
-  { to: '/admins',   label: 'Admin users', icon: UserCog,    section: 'Admin' },
-  { to: '/system',   label: 'System',      icon: Cog },
-  { to: '/activity', label: 'Activity',    icon: ScrollText },
-  { to: '/settings', label: 'Profile',     icon: Settings },
+// ============================================================
+// Sidebar groups — each group collapses independently. A group
+// auto-opens when the current route belongs to one of its items,
+// so the user always sees where they are. Everything else stays
+// tucked away to keep the sidebar quiet.
+// ============================================================
+const GROUPS = [
+  {
+    key: 'customers',
+    label: 'Customers',
+    items: [
+      { to: '/',                   label: 'Overview',         icon: LayoutDashboard, end: true },
+      { to: '/orders',             label: 'Orders',           icon: Inbox, badge: 'pending' },
+      { to: '/customers',          label: 'Customers',        icon: Users },
+      { to: '/customer-accounts',  label: 'Portal accounts',  icon: UserCheck },
+      { to: '/subscriptions',      label: 'Subscriptions',    icon: Activity },
+      { to: '/vouchers',           label: 'Vouchers',         icon: Ticket },
+    ],
+  },
+  {
+    key: 'network',
+    label: 'Network',
+    items: [
+      { to: '/monitoring', label: 'Live Sessions', icon: Radio },
+      { to: '/packages',   label: 'Packages',      icon: Package },
+      { to: '/routers',    label: 'Routers',       icon: RouterIcon },
+      { to: '/configs',    label: 'Configs',       icon: FileCode },
+      { to: '/vpn',        label: 'VPN',           icon: Shield },
+      { to: '/scripts',    label: 'Scripts',       icon: Terminal },
+      { to: '/updates',    label: 'Updates',       icon: RefreshCw },
+    ],
+  },
+  {
+    key: 'admin',
+    label: 'Admin',
+    items: [
+      { to: '/admins',   label: 'Admin users', icon: UserCog },
+      { to: '/system',   label: 'System',      icon: Cog },
+      { to: '/activity', label: 'Activity',    icon: ScrollText },
+      { to: '/settings', label: 'Profile',     icon: Settings },
+    ],
+  },
 ];
 
 export default function Layout() {
@@ -47,12 +66,28 @@ export default function Layout() {
   });
 
   const pendingCount = stats?.pendingOrders ?? 0;
+  const { pathname } = useLocation();
+
+  // Figure out which group the active route lives in — that one
+  // is expanded by default; the rest start collapsed so the
+  // sidebar isn't a wall of items on first load.
+  const activeGroup = useMemo(() => {
+    for (const g of GROUPS) {
+      if (g.items.some((i) => i.end ? pathname === i.to : pathname.startsWith(i.to))) {
+        return g.key;
+      }
+    }
+    return 'customers';
+  }, [pathname]);
+
+  const [openGroups, setOpenGroups] = useState(() => ({ [activeGroup]: true }));
+  useEffect(() => {
+    setOpenGroups((prev) => ({ ...prev, [activeGroup]: true }));
+  }, [activeGroup]);
+  const toggleGroup = (key) =>
+    setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
 
   // ---- Branding (logo, primary colour, site name) --------------
-  // Read once per session and apply as a CSS variable so existing
-  // utility classes can still use `text-amber` / `bg-amber` but the
-  // user can override the accent from System Settings without a
-  // frontend rebuild.
   const { data: settingsRows } = useQuery({
     queryKey: ['settings-branding'],
     queryFn: apiSettings,
@@ -74,11 +109,21 @@ export default function Layout() {
     }
   }, [branding.color]);
 
+  // ---- Scroll scoping ------------------------------------------
+  // We want ONLY the main content to scroll — not the whole page
+  // (which would also drag the sidebar/footer with it). Lock body
+  // scroll for the lifetime of the admin shell.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   return (
-    <div className="min-h-screen flex text-text">
+    <div className="h-screen flex text-text overflow-hidden">
       {/* ─────────── Sidebar ─────────── */}
       <aside className="w-60 shrink-0 bg-surface border-r border-border flex flex-col relative">
-        <div className="absolute inset-0 grid-overlay" />
+        <div className="absolute inset-0 grid-overlay pointer-events-none" />
 
         {/* brand */}
         <div className="relative px-5 py-5 border-b border-border-dim">
@@ -138,45 +183,60 @@ export default function Layout() {
           </div>
         </div>
 
-        {/* nav */}
-        <nav className="relative flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
-          {nav.map((item) => {
-            const showBadge = item.badge === 'pending' && pendingCount > 0;
+        {/* collapsible nav groups */}
+        <nav className="relative flex-1 py-2 px-2 space-y-1 overflow-y-auto">
+          {GROUPS.map((g) => {
+            const isOpen = !!openGroups[g.key];
             return (
-              <div key={item.to}>
-                {item.section && (
-                  <div className="pt-3 pb-1 px-3 text-mono text-[9px] text-text-mute uppercase tracking-[0.2em]">
-                    {item.section}
+              <div key={g.key}>
+                <button
+                  onClick={() => toggleGroup(g.key)}
+                  className="w-full flex items-center justify-between px-3 py-1.5 text-mono text-[10px] text-text-mute uppercase tracking-[0.2em] hover:text-text transition-colors"
+                >
+                  <span>{g.label}</span>
+                  <ChevronDown
+                    size={12}
+                    className={clsx('transition-transform', isOpen ? 'rotate-0' : '-rotate-90')}
+                  />
+                </button>
+                {isOpen && (
+                  <div className="mt-1 space-y-0.5">
+                    {g.items.map((item) => {
+                      const showBadge = item.badge === 'pending' && pendingCount > 0;
+                      return (
+                        <NavLink
+                          key={item.to}
+                          to={item.to}
+                          end={item.end}
+                          className={({ isActive }) =>
+                            clsx(
+                              'group flex items-center gap-3 px-3 py-2 text-sm transition-all rounded-sm relative',
+                              'hover:bg-surface2',
+                              isActive
+                                ? 'bg-surface2 text-amber'
+                                : 'text-text-dim hover:text-text'
+                            )
+                          }
+                        >
+                          {({ isActive }) => (
+                            <>
+                              {isActive && (
+                                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-5 bg-amber shadow-glow-amber" />
+                              )}
+                              <item.icon size={15} strokeWidth={1.5} />
+                              <span className="flex-1">{item.label}</span>
+                              {showBadge && (
+                                <span className="text-mono text-[10px] bg-amber text-black px-1.5 py-px rounded-sm">
+                                  {pendingCount}
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </NavLink>
+                      );
+                    })}
                   </div>
                 )}
-                <NavLink
-                  to={item.to}
-                  end={item.end}
-                  className={({ isActive }) =>
-                    clsx(
-                      'group flex items-center gap-3 px-3 py-2 text-sm transition-all rounded-sm relative',
-                      'hover:bg-surface2',
-                      isActive
-                        ? 'bg-surface2 text-amber'
-                        : 'text-text-dim hover:text-text'
-                    )
-                  }
-                >
-                  {({ isActive }) => (
-                    <>
-                      {isActive && (
-                        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-5 bg-amber shadow-glow-amber" />
-                      )}
-                      <item.icon size={15} strokeWidth={1.5} />
-                      <span className="flex-1">{item.label}</span>
-                      {showBadge && (
-                        <span className="text-mono text-[10px] bg-amber text-black px-1.5 py-px rounded-sm">
-                          {pendingCount}
-                        </span>
-                      )}
-                    </>
-                  )}
-                </NavLink>
               </div>
             );
           })}

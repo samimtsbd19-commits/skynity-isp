@@ -21,6 +21,7 @@ import Updates from './pages/Updates';
 import SystemSettings from './pages/SystemSettings';
 import Admins from './pages/Admins';
 import Vouchers from './pages/Vouchers';
+import CustomerAccounts from './pages/CustomerAccounts';
 import PublicPortal from './pages/PublicPortal';
 
 const qc = new QueryClient({
@@ -63,6 +64,7 @@ export default function App() {
               <Route path="orders" element={<Orders />} />
               <Route path="customers" element={<Customers />} />
               <Route path="customers/:id" element={<CustomerDetail />} />
+              <Route path="customer-accounts" element={<CustomerAccounts />} />
               <Route path="subscriptions" element={<Subscriptions />} />
               <Route path="monitoring" element={<Monitoring />} />
               <Route path="packages" element={<Packages />} />

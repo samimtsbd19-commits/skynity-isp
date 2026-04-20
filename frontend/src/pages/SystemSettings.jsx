@@ -3,25 +3,29 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Save, Settings as Cog, Shield, Palette, Globe, Phone, Clock,
   CreditCard, FileText, MessageSquare, Send, CheckCircle2, XCircle,
+  Zap, Gift, Play,
 } from 'lucide-react';
 import {
   apiSettings, apiSettingsBulk,
   apiNotifyChannels, apiNotifyTest,
+  apiRunExpiryReminders,
 } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { Skeleton } from '../components/primitives';
 
 const SECTIONS = [
-  { key: 'site',         title: 'Site',             icon: Globe },
-  { key: 'branding',     title: 'Branding / Logo',  icon: Palette },
-  { key: 'payment',      title: 'Payment methods',  icon: CreditCard },
-  { key: 'invoice',      title: 'Invoicing',        icon: FileText },
-  { key: 'provisioning', title: 'Provisioning',     icon: Cog },
+  { key: 'feature',      title: 'Features (on / off)', icon: Zap },
+  { key: 'site',         title: 'Site',                icon: Globe },
+  { key: 'branding',     title: 'Branding / Logo',     icon: Palette },
+  { key: 'payment',      title: 'Payment methods',     icon: CreditCard },
+  { key: 'invoice',      title: 'Invoicing',           icon: FileText },
+  { key: 'trial',        title: 'Free trial',          icon: Gift },
+  { key: 'provisioning', title: 'Provisioning',        icon: Cog },
   { key: 'notify',       title: 'Notifications (OTP / SMS / WhatsApp / Telegram)', icon: MessageSquare },
-  { key: 'telegram',     title: 'Telegram',         icon: Phone },
-  { key: 'security',     title: 'Security',         icon: Shield },
-  { key: 'vpn',          title: 'VPN defaults',     icon: Shield },
-  { key: 'updates',      title: 'Updates',          icon: Clock },
+  { key: 'telegram',     title: 'Telegram',            icon: Phone },
+  { key: 'security',     title: 'Security',            icon: Shield },
+  { key: 'vpn',          title: 'VPN defaults',        icon: Shield },
+  { key: 'updates',      title: 'Updates',             icon: Clock },
 ];
 
 export default function SystemSettings() {
@@ -80,7 +84,12 @@ export default function SystemSettings() {
                   <h2 className="text-display text-xl italic">{sec.title}</h2>
                 </div>
 
-                {sec.key === 'notify' && <NotifyChannelStatus />}
+                {sec.key === 'notify' && (
+                  <>
+                    <NotifyChannelStatus />
+                    <RunExpiryRemindersButton />
+                  </>
+                )}
 
                 <div className="grid md:grid-cols-2 gap-4">
                   {rows.map((s) => (
@@ -97,6 +106,39 @@ export default function SystemSettings() {
           })
         )}
       </div>
+    </div>
+  );
+}
+
+function RunExpiryRemindersButton() {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const click = async () => {
+    setBusy(true); setMsg('');
+    try {
+      await apiRunExpiryReminders();
+      setMsg('ok');
+    } catch (ex) {
+      setMsg(ex?.response?.data?.error || ex.message);
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="mt-4 p-4 rounded border border-border-dim bg-surface">
+      <div className="text-sm font-semibold mb-1">Expiry reminders</div>
+      <div className="text-xs text-text-mute mb-3">
+        The job runs automatically at 08:00 daily. Click below to trigger a run right now
+        (useful the first time you enable expiry reminders).
+      </div>
+      <button
+        onClick={click}
+        disabled={busy}
+        className="btn btn-ghost text-xs"
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+      >
+        <Play size={12} /> {busy ? 'Running…' : 'Run expiry reminders now'}
+      </button>
+      {msg === 'ok'  && <span className="ml-3 text-xs" style={{ color: '#10b981' }}>sent</span>}
+      {msg && msg !== 'ok' && <span className="ml-3 text-xs text-red">{msg}</span>}
     </div>
   );
 }

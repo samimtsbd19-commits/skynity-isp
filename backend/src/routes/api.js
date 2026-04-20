@@ -14,6 +14,8 @@ import routersRouter from './routers.js';
 import portalRouter from './portal.js';
 import vouchersRouter from './vouchers.js';
 import notifyRouter from './notify.js';
+import customerAccountsRouter from './customerAccounts.js';
+import { sendExpiryReminders } from '../jobs/scheduler.js';
 import { renderInvoiceForOrder } from '../services/invoice.js';
 
 const router = Router();
@@ -28,6 +30,16 @@ router.use('/admins',   adminsRouter);
 router.use('/routers-admin', routersRouter);
 router.use('/vouchers',  vouchersRouter);
 router.use('/notify',    notifyRouter);
+router.use('/customer-accounts', customerAccountsRouter);
+
+// ------------------------------------------------------------
+// Manual "run now" for the expiry-reminder job. Handy right
+// after configuring the notification channels for the first time.
+// ------------------------------------------------------------
+router.post('/jobs/expiry-reminders/run', requireAdmin, async (_req, res) => {
+  try { await sendExpiryReminders(); res.json({ ok: true }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // PUBLIC (no auth) — self-service customer portal
 router.use('/portal',   portalRouter);

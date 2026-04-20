@@ -95,11 +95,22 @@ function Landing() {
 
   const pkgs = info.packages || [];
   const sym = info.currency_symbol || '৳';
+  const flags = info.flags || {};
+  const apps  = info.apps  || {};
+  const color = info.branding?.primary_color || '#f59e0b';
 
   return (
     <Layout branding={info.branding}>
+      {/* Top promo row — free trial + PWA install */}
+      {(flags.free_trial || flags.pwa_install) && (
+        <div style={{ marginBottom: 20, display: 'grid', gap: 10 }}>
+          {flags.free_trial && <TrialBanner color={color} />}
+          {flags.pwa_install && <InstallBanner />}
+        </div>
+      )}
+
       <div className="kicker" style={{ textAlign: 'center', marginBottom: 8 }}>Available packages</div>
-      <h2 style={{ margin: '0 0 20px', textAlign: 'center', fontSize: 22 }}>Choose your <em style={{ color: info.branding?.primary_color || '#f59e0b' }}>plan</em></h2>
+      <h2 style={{ margin: '0 0 20px', textAlign: 'center', fontSize: 22 }}>Choose your <em style={{ color }}>plan</em></h2>
 
       {pkgs.length === 0 ? (
         <div className="card" style={{ textAlign: 'center' }}>
@@ -117,7 +128,7 @@ function Landing() {
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <span className={`tag tag-${p.service_type}`}>{p.service_type}</span>
-                <span style={{ fontWeight: 700, color: info.branding?.primary_color || '#f59e0b' }}>
+                <span style={{ fontWeight: 700, color }}>
                   {sym}{Number(p.price).toFixed(0)}
                 </span>
               </div>
@@ -130,11 +141,100 @@ function Landing() {
       )}
 
       <div style={{ marginTop: 32, display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))' }}>
-        <Link to="/portal/redeem" className="btn">🎟 Redeem voucher</Link>
+        {flags.vouchers_portal !== false && (
+          <Link to="/portal/redeem" className="btn">🎟 Redeem voucher</Link>
+        )}
         <Link to="/portal/login"  className="btn btn-ghost">↻ Returning customer login</Link>
+        {flags.customer_accounts && (
+          <Link to="/portal/account" className="btn btn-ghost">👤 My account</Link>
+        )}
         <Link to="/portal/status" className="btn btn-ghost">🔎 Check order status</Link>
       </div>
+
+      {/* App download row */}
+      {flags.show_download_button && (apps.android_url || apps.ios_url) && (
+        <div style={{ marginTop: 24, textAlign: 'center' }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Prefer the app?</div>
+          <div style={{ display: 'inline-flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+            {apps.android_url && (
+              <a className="btn btn-ghost" href={apps.android_url} target="_blank" rel="noopener noreferrer">
+                📱 Android
+              </a>
+            )}
+            {apps.ios_url && (
+              <a className="btn btn-ghost" href={apps.ios_url} target="_blank" rel="noopener noreferrer">
+                🍏 iOS
+              </a>
+            )}
+          </div>
+        </div>
+      )}
     </Layout>
+  );
+}
+
+// ===================================================================
+// Top-of-landing banners
+// ===================================================================
+function TrialBanner({ color }) {
+  const nav = useNavigate();
+  return (
+    <button
+      onClick={() => nav('/portal/trial')}
+      className="card"
+      style={{
+        background: `linear-gradient(135deg, ${color}22, ${color}08)`,
+        border: `1px solid ${color}55`,
+        textAlign: 'left', cursor: 'pointer', color: 'inherit',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ fontSize: 28 }}>🎁</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>7 days free — on us</div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+            One free trial per phone. Claim from our WiFi and connect right away.
+          </div>
+        </div>
+        <div style={{ color, fontWeight: 700 }}>Start →</div>
+      </div>
+    </button>
+  );
+}
+
+function InstallBanner() {
+  const [deferred, setDeferred] = useState(null);
+  const [installed, setInstalled] = useState(false);
+
+  useEffect(() => {
+    const h = (e) => { e.preventDefault(); setDeferred(e); };
+    window.addEventListener('beforeinstallprompt', h);
+    const ih = () => setInstalled(true);
+    window.addEventListener('appinstalled', ih);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', h);
+      window.removeEventListener('appinstalled', ih);
+    };
+  }, []);
+
+  if (installed || !deferred) return null;
+
+  return (
+    <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ fontSize: 22 }}>📲</div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>Install this portal as an app</div>
+        <div className="muted" style={{ fontSize: 11 }}>One-tap access from your home screen.</div>
+      </div>
+      <button
+        className="btn btn-ghost"
+        onClick={async () => {
+          deferred.prompt();
+          const r = await deferred.userChoice;
+          if (r.outcome !== 'dismissed') setDeferred(null);
+        }}
+      >Install</button>
+    </div>
   );
 }
 
@@ -968,6 +1068,411 @@ function Renew() {
 // Root component — owns its own BrowserRouter so it can be mounted
 // completely outside the admin app.
 // ===================================================================
+// ===================================================================
+// Page: Free trial — /portal/trial
+// ===================================================================
+function TrialClaim() {
+  const info = useBranding();
+  const color = info?.branding?.primary_color || '#f59e0b';
+  const [params] = useSearchParams();
+  const mac = params.get('mac') || '';
+
+  const [phone, setPhone] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [status, setStatus] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [trial, setTrial] = useState(null);
+
+  // Check trial eligibility as the user enters their phone.
+  useEffect(() => {
+    if (!phone || phone.length < 11) { setStatus(null); return; }
+    let cancelled = false;
+    api.get('/trial/status', { params: { phone: phone.trim() } })
+      .then((r) => { if (!cancelled) setStatus(r.data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [phone]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErr(''); setBusy(true);
+    try {
+      const { data } = await api.post('/trial', {
+        full_name: fullName.trim(),
+        phone: phone.trim(),
+        mac: mac || undefined,
+      });
+      setTrial(data.trial);
+    } catch (ex) {
+      setErr(ex?.response?.data?.error || ex.message);
+    } finally { setBusy(false); }
+  };
+
+  if (trial) {
+    return (
+      <Layout branding={info?.branding}>
+        <div className="card">
+          <div className="kicker">🎉 You're in</div>
+          <h2 style={{ margin: '4px 0 0' }}>
+            Free trial · <em style={{ color }}>{trial.duration_days} days</em>
+          </h2>
+          <p className="muted" style={{ marginTop: 6 }}>
+            {trial.package.name} · {Number(trial.package.rate_down_mbps)} Mbps · {trial.package.service_type.toUpperCase()}
+          </p>
+          <div style={{
+            marginTop: 16, background: '#0b0f19', border: '1px solid #1f2937',
+            padding: 16, borderRadius: 8, fontFamily: 'ui-monospace, Menlo, monospace',
+          }}>
+            <div><span className="muted">Username:</span> <b>{trial.login_username}</b></div>
+            <div><span className="muted">Password:</span> <b>{trial.login_password}</b></div>
+            <div><span className="muted">Expires: </span> {new Date(trial.expires_at).toLocaleString()}</div>
+          </div>
+          <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Link to="/portal" className="btn btn-ghost">← Home</Link>
+            <Link to="/portal/login" className="btn" style={{ background: color }}>My account →</Link>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
+  return (
+    <Layout branding={info?.branding}>
+      <div className="card">
+        <div className="kicker">Free trial</div>
+        <h2 style={{ margin: '4px 0 0' }}>7 days on us — <em style={{ color }}>one per phone</em></h2>
+        <p className="muted" style={{ marginTop: 6 }}>
+          Enter your details below. We'll activate a trial subscription immediately.
+        </p>
+
+        <form onSubmit={submit} style={{ marginTop: 16 }}>
+          <div style={{ marginBottom: 12 }}>
+            <label className="label">Full name</label>
+            <input required value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Your name" />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label className="label">Mobile number</label>
+            <input
+              required value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="01XXXXXXXXX" inputMode="tel"
+            />
+            {status && status.already_used && (
+              <div className="err" style={{ marginTop: 6 }}>
+                This number has already used the trial. Pick a plan instead.
+              </div>
+            )}
+            {status && !status.enabled && (
+              <div className="err" style={{ marginTop: 6 }}>
+                The free trial isn't currently available.
+              </div>
+            )}
+          </div>
+          {err && <div className="err">{err}</div>}
+          <button
+            type="submit" className="btn"
+            style={{ background: color }}
+            disabled={busy || (status && (status.already_used || !status.enabled))}
+          >
+            {busy ? 'Activating…' : 'Claim my free trial'}
+          </button>
+        </form>
+      </div>
+    </Layout>
+  );
+}
+
+// ===================================================================
+// Page: Account signup / login / dashboard — /portal/account
+// ===================================================================
+function AccountShell() {
+  const info = useBranding();
+  const [token, setToken] = useState(() => localStorage.getItem('skynity_acc_token') || null);
+  const color = info?.branding?.primary_color || '#f59e0b';
+
+  useEffect(() => {
+    if (token) localStorage.setItem('skynity_acc_token', token);
+    else localStorage.removeItem('skynity_acc_token');
+  }, [token]);
+
+  if (!token) return <AccountAuth onToken={setToken} color={color} branding={info?.branding} />;
+  return <AccountDashboard token={token} onLogout={() => setToken(null)} branding={info?.branding} color={color} />;
+}
+
+function AccountAuth({ onToken, color, branding }) {
+  const [mode, setMode] = useState('login'); // 'login' | 'signup'
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErr(''); setOk(''); setBusy(true);
+    try {
+      if (mode === 'signup') {
+        await api.post('/account/signup', {
+          full_name: fullName.trim(),
+          phone: phone.trim(),
+          email: email.trim() || undefined,
+          password,
+        });
+        setOk('Signup received — an admin will review your account shortly. You\'ll get a message once approved.');
+        setMode('login');
+      } else {
+        const { data } = await api.post('/account/login', {
+          phone: phone.trim(),
+          password,
+        });
+        onToken(data.token);
+      }
+    } catch (ex) {
+      setErr(ex?.response?.data?.error || ex.message);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Layout branding={branding}>
+      <div className="card">
+        <div className="kicker">Customer portal</div>
+        <h2 style={{ margin: '4px 0 12px' }}>
+          {mode === 'signup' ? 'Create your account' : 'Welcome back'}
+        </h2>
+
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          <button type="button" onClick={() => setMode('login')}
+            className="btn btn-ghost" style={mode === 'login' ? { borderColor: color, color } : {}}>
+            Log in
+          </button>
+          <button type="button" onClick={() => setMode('signup')}
+            className="btn btn-ghost" style={mode === 'signup' ? { borderColor: color, color } : {}}>
+            Sign up
+          </button>
+        </div>
+
+        <form onSubmit={submit}>
+          {mode === 'signup' && (
+            <div style={{ marginBottom: 12 }}>
+              <label className="label">Full name</label>
+              <input required value={fullName} onChange={(e) => setFullName(e.target.value)} />
+            </div>
+          )}
+          <div style={{ marginBottom: 12 }}>
+            <label className="label">Mobile number</label>
+            <input required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01XXXXXXXXX" inputMode="tel" />
+          </div>
+          {mode === 'signup' && (
+            <div style={{ marginBottom: 12 }}>
+              <label className="label">Email (optional)</label>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            </div>
+          )}
+          <div style={{ marginBottom: 12 }}>
+            <label className="label">Password</label>
+            <input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={6} />
+          </div>
+          {err && <div className="err">{err}</div>}
+          {ok && <div style={{ color: '#10b981', marginBottom: 10 }}>{ok}</div>}
+          <button type="submit" className="btn" style={{ background: color }} disabled={busy}>
+            {busy ? '…' : mode === 'signup' ? 'Create account' : 'Log in'}
+          </button>
+        </form>
+
+        <div style={{ marginTop: 16 }}>
+          <Link to="/portal" className="btn btn-ghost">← Back to packages</Link>
+        </div>
+      </div>
+    </Layout>
+  );
+}
+
+function AccountDashboard({ token, onLogout, branding, color }) {
+  const [data, setData]   = useState(null);
+  const [err, setErr]     = useState('');
+  const [info, setInfo]   = useState(null);
+
+  const authApi = useMemo(() => {
+    const inst = axiosClone();
+    inst.defaults.headers.Authorization = `Bearer ${token}`;
+    return inst;
+  }, [token]);
+
+  const load = async () => {
+    try { setData((await authApi.get('/account/me')).data); }
+    catch (ex) {
+      if (ex?.response?.status === 401) onLogout();
+      setErr(ex?.response?.data?.error || ex.message);
+    }
+  };
+  useEffect(() => { load(); api.get('/packages').then((r) => setInfo(r.data)).catch(() => {}); }, []);  // eslint-disable-line
+
+  if (!data) return <Layout branding={branding}><div className="muted" style={{ textAlign: 'center' }}>{err || 'Loading…'}</div></Layout>;
+
+  const acc = data.account;
+  const subs = data.subscriptions || [];
+
+  return (
+    <Layout branding={branding}>
+      <div className="card">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div className="kicker">My account</div>
+            <h2 style={{ margin: '2px 0 0' }}>Hi, {acc.full_name}</h2>
+            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+              {acc.phone}{acc.email ? ` · ${acc.email}` : ''}
+            </div>
+          </div>
+          <button onClick={onLogout} className="btn btn-ghost">Log out</button>
+        </div>
+      </div>
+
+      {!data.customer && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="kicker">Link your order</div>
+          <h3 style={{ margin: '4px 0' }}>Connect this account to your existing service</h3>
+          <p className="muted" style={{ fontSize: 12 }}>
+            Enter an order code (ORD-…) you received when placing an order with the same phone number.
+          </p>
+          <LinkOrderForm api={authApi} onDone={load} color={color} />
+        </div>
+      )}
+
+      {subs.length > 0 && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="kicker">Subscriptions</div>
+          <div style={{ display: 'grid', gap: 10, marginTop: 8 }}>
+            {subs.map((s) => (
+              <SubscriptionBlock key={s.id} sub={s} color={color} packages={info?.packages || []} api={authApi} onDone={load} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <Link to="/portal" className="btn btn-ghost">← Browse packages</Link>
+      </div>
+    </Layout>
+  );
+}
+
+function LinkOrderForm({ api: authApi, onDone, color }) {
+  const [code, setCode] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErr(''); setBusy(true);
+    try {
+      await authApi.post('/account/link', { order_code: code.trim().toUpperCase() });
+      onDone();
+    } catch (ex) {
+      setErr(ex?.response?.data?.error || ex.message);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <form onSubmit={submit} style={{ marginTop: 8 }}>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="ORD-YYYYMMDD-XXXXXX" required />
+        <button className="btn" style={{ background: color }} disabled={busy || !code}>{busy ? '…' : 'Link'}</button>
+      </div>
+      {err && <div className="err" style={{ marginTop: 6 }}>{err}</div>}
+    </form>
+  );
+}
+
+function SubscriptionBlock({ sub, color, packages, api: authApi, onDone }) {
+  const [changing, setChanging] = useState(false);
+  const [target, setTarget] = useState('');
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const expires = new Date(sub.expires_at);
+  const daysLeft = Math.ceil((expires - new Date()) / 86400000);
+  const expired = daysLeft <= 0;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErr(''); setBusy(true);
+    try {
+      const { data } = await authApi.post('/account/change-package', {
+        subscription_id: sub.id,
+        new_package_code: target,
+      });
+      setOk(data);
+      setChanging(false);
+    } catch (ex) {
+      setErr(ex?.response?.data?.error || ex.message);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div style={{ border: '1px solid #1f2937', borderRadius: 8, padding: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span className={`tag tag-${sub.service_type}`}>{sub.service_type}</span>
+        <div style={{ fontWeight: 600 }}>{sub.package_name}</div>
+        <div style={{ marginLeft: 'auto', fontSize: 12 }} className="muted">
+          {expired ? <span style={{ color: '#ef4444' }}>expired</span>
+                   : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`}
+        </div>
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginTop: 6, fontFamily: 'ui-monospace, Menlo, monospace' }}>
+        <div>user: <b>{sub.login_username}</b> · pass: <b>{sub.login_password}</b></div>
+        <div>expires: {expires.toLocaleString()}</div>
+        {sub.mac_address && (
+          <div>{sub.bind_to_mac ? '🔒 MAC-locked: ' : 'Last MAC: '}<code>{sub.mac_address}</code></div>
+        )}
+      </div>
+      {!changing && !ok && (
+        <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={() => setChanging(true)} className="btn btn-ghost">🔁 Change package</button>
+        </div>
+      )}
+      {changing && (
+        <form onSubmit={submit} style={{ marginTop: 10 }}>
+          <label className="label">New package</label>
+          <select required value={target} onChange={(e) => setTarget(e.target.value)}>
+            <option value="">Select…</option>
+            {packages.filter((p) => p.code !== sub.package_code).map((p) => (
+              <option key={p.code} value={p.code}>
+                {p.name} · {Number(p.rate_down_mbps)}M · {p.duration_days}d
+              </option>
+            ))}
+          </select>
+          {err && <div className="err" style={{ marginTop: 6 }}>{err}</div>}
+          <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+            <button type="submit" className="btn" style={{ background: color }} disabled={busy || !target}>
+              {busy ? '…' : 'Request change'}
+            </button>
+            <button type="button" onClick={() => setChanging(false)} className="btn btn-ghost">Cancel</button>
+          </div>
+        </form>
+      )}
+      {ok && (
+        <div style={{
+          marginTop: 10, padding: 10, borderRadius: 6,
+          background: '#0b3d2e', color: '#d1fae5', fontSize: 12,
+        }}>
+          ✅ Change request created. Order code: <b>{ok.order_code}</b> — {ok.amount}.
+          Pay it from <Link to={`/portal/status/${ok.order_code}`} style={{ color: '#86efac' }}>here</Link>.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Separate axios instance for authenticated calls — avoids cross-pollution
+// with the main anonymous `api` used by everything else on this page.
+function axiosClone() {
+  return axios.create({ baseURL: '/api/portal', timeout: 20000 });
+}
+
 export default function PublicPortal() {
   return (
     <Routes>
@@ -975,7 +1480,9 @@ export default function PublicPortal() {
       <Route path="/order" element={<OrderFlow />} />
       <Route path="/redeem" element={<Redeem />} />
       <Route path="/renew" element={<Renew />} />
+      <Route path="/trial" element={<TrialClaim />} />
       <Route path="/login" element={<CustomerLogin />} />
+      <Route path="/account" element={<AccountShell />} />
       <Route path="/status" element={<StatusLookup />} />
       <Route path="/status/:code" element={<StatusLookup />} />
       <Route path="*" element={<Navigate to="/portal" replace />} />

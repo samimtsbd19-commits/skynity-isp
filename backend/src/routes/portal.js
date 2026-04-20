@@ -43,6 +43,9 @@ import vouchers from '../services/vouchers.js';
 import { renderInvoiceForOrder } from '../services/invoice.js';
 import { normaliseMac } from '../utils/mac.js';
 import otp from '../services/otp.js';
+import trial from '../services/trial.js';
+import bcrypt from 'bcrypt';
+import { signCustomerToken, requireCustomer } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -148,12 +151,15 @@ async function paymentInfo() {
 // ============================================================
 router.get('/packages', getLimiter, async (_req, res) => {
   try {
-    const [pkgs, brandName, logoUrl, primaryColor, pay] = await Promise.all([
+    const [pkgs, brandName, logoUrl, primaryColor, pay, flags, androidUrl, iosUrl] = await Promise.all([
       publicPackageInfo(),
       settings.getSetting('site.name'),
       settings.getSetting('branding.logo_url'),
       settings.getSetting('branding.primary_color'),
       paymentInfo(),
+      publicFeatureFlags(),
+      settings.getSetting('site.app_android_url'),
+      settings.getSetting('site.app_ios_url'),
     ]);
     res.json({
       packages: pkgs,
@@ -165,12 +171,51 @@ router.get('/packages', getLimiter, async (_req, res) => {
       payment: { bkash: pay.bkash, nagad: pay.nagad },
       currency_symbol: pay.currency_symbol,
       support_phone: pay.support_phone,
+      flags,
+      apps: {
+        android_url: androidUrl || '',
+        ios_url: iosUrl || '',
+      },
     });
   } catch (err) {
     logger.error({ err }, 'portal packages failed');
     res.status(500).json({ error: 'internal error' });
   }
 });
+
+// ============================================================
+// 1b) GET /portal/flags — a lighter endpoint when only the
+//     frontend's feature-toggle state is needed (sidebar /
+//     app shell / install button, etc).
+// ============================================================
+router.get('/flags', getLimiter, async (_req, res) => {
+  try {
+    res.json({ flags: await publicFeatureFlags() });
+  } catch (err) {
+    logger.error({ err }, 'portal flags failed');
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+/**
+ * Collect every setting whose key begins with `feature.` and
+ * return them as { flagName: bool } — the public portal uses
+ * this to gate tabs and buttons. We deliberately do NOT expose
+ * any other settings here.
+ */
+async function publicFeatureFlags() {
+  const rows = await db.query(
+    `SELECT setting_key AS \`key\`, setting_value AS value, value_type
+       FROM system_settings
+      WHERE setting_key LIKE 'feature.%'`
+  );
+  const out = {};
+  for (const r of rows) {
+    const name = r.key.slice('feature.'.length);
+    out[name] = String(r.value).toLowerCase() === 'true' || r.value === '1' || r.value === 1;
+  }
+  return out;
+}
 
 // ============================================================
 // 2) POST /portal/orders
@@ -633,6 +678,269 @@ router.post('/otp/verify', postLimiter, async (req, res) => {
   } catch (err) {
     logger.error({ err }, 'otp verify failed');
     res.status(500).json({ error: err.message || 'internal error' });
+  }
+});
+
+// ============================================================
+// 12) GET /portal/trial/status?phone=01xx
+//     Tells the UI whether the phone is eligible for the trial
+//     and how the trial package is configured. The portal uses
+//     this to show / hide the "claim free trial" button and to
+//     render the offer card.
+// ============================================================
+router.get('/trial/status', getLimiter, async (req, res) => {
+  try {
+    const cfg = await trial.isTrialConfigured();
+    if (!cfg.ok) return res.json({ enabled: false });
+    const phone = normalisePhone(req.query.phone);
+    const already = phone ? await trial.hasPhoneUsedTrial(phone) : false;
+    res.json({
+      enabled: true,
+      duration_days: Number((await settings.getSetting('trial.duration_days')) || 7),
+      already_used: already,
+      package: {
+        name: cfg.pkg.name,
+        code: cfg.pkg.code,
+        rate_down_mbps: cfg.pkg.rate_down_mbps,
+        rate_up_mbps: cfg.pkg.rate_up_mbps,
+        service_type: cfg.pkg.service_type,
+      },
+    });
+  } catch (err) {
+    logger.error({ err }, 'trial status failed');
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// ============================================================
+// 13) POST /portal/trial  { full_name, phone, mac? }
+//     Creates a free trial subscription for this phone.
+// ============================================================
+router.post('/trial', postLimiter, async (req, res) => {
+  try {
+    const phone = normalisePhone(req.body?.phone);
+    const fullName = String(req.body?.full_name || '').trim();
+    const mac = req.body?.mac;
+    if (!phone) return res.status(400).json({ error: 'phone required' });
+    if (fullName.length < 2) return res.status(400).json({ error: 'full_name required' });
+
+    const result = await trial.activateTrial({
+      fullName, phone, mac, ip: clientIp(req),
+    });
+
+    // Best-effort admin ping so they know a trial was claimed.
+    notifyAdmins(
+      `🎁 Free trial claimed\n` +
+      `• Name: ${fullName}\n` +
+      `• Phone: \`${phone}\`\n` +
+      `• Package: *${result.package.name}*\n` +
+      `• Expires: ${new Date(result.expires_at).toLocaleString()}`
+    ).catch(() => {});
+
+    res.json({ ok: true, trial: result });
+  } catch (err) {
+    logger.warn({ err: err.message }, 'trial activation rejected');
+    res.status(400).json({ error: err.message || 'trial failed' });
+  }
+});
+
+// ============================================================
+// 14) Customer-account self-service (signup → approve → login)
+// ------------------------------------------------------------
+//  POST /portal/account/signup  { full_name, phone, password, email? }
+//       → creates a customer_accounts row in status='pending'.
+//
+//  POST /portal/account/login   { phone, password }
+//       → returns a bearer token if status='approved'.
+//
+//  GET  /portal/account/me                           (bearer)
+//       → profile + linked customer + subscriptions + orders.
+//
+//  POST /portal/account/link    { order_code, login? }  (bearer)
+//       → attaches a past order / subscription to this account.
+//         If the account has no customer_id yet, we link the
+//         order's customer and the account together.
+//
+//  POST /portal/account/change-package  (bearer)
+//       { subscription_id, new_package_code }
+//       → creates a new order as a renewal of the given sub
+//         on the new package. Customer still needs to pay &
+//         get admin approval before the change lands.
+// ============================================================
+async function accountsEnabled() {
+  return !!(await settings.getSetting('feature.customer_accounts'));
+}
+
+router.post('/account/signup', postLimiter, async (req, res) => {
+  try {
+    if (!(await accountsEnabled())) return res.status(403).json({ error: 'signup disabled' });
+    const fullName = String(req.body?.full_name || '').trim();
+    const phone    = normalisePhone(req.body?.phone);
+    const password = String(req.body?.password || '');
+    const email    = req.body?.email ? String(req.body.email).trim().slice(0, 100) : null;
+    if (fullName.length < 2) return res.status(400).json({ error: 'full_name required' });
+    if (!phone) return res.status(400).json({ error: 'valid phone required' });
+    if (password.length < 6) return res.status(400).json({ error: 'password must be at least 6 chars' });
+
+    const existing = await db.queryOne('SELECT id, status FROM customer_accounts WHERE phone = ?', [phone]);
+    if (existing) return res.status(409).json({ error: `an account already exists for this phone (${existing.status})` });
+
+    const hash = await bcrypt.hash(password, 10);
+    const customer = await db.queryOne('SELECT id FROM customers WHERE phone = ?', [phone]);
+    const r = await db.query(
+      `INSERT INTO customer_accounts (customer_id, full_name, phone, email, password_hash, status)
+       VALUES (?, ?, ?, ?, ?, 'pending')`,
+      [customer?.id || null, fullName, phone, email, hash]
+    );
+
+    notifyAdmins(
+      `🙋 New account signup\n` +
+      `• Name: ${fullName}\n` +
+      `• Phone: \`${phone}\`\n` +
+      (email ? `• Email: ${email}\n` : '') +
+      `Approve from the admin dashboard → Customer accounts.`
+    ).catch(() => {});
+
+    res.json({ ok: true, account_id: r.insertId, status: 'pending' });
+  } catch (err) {
+    logger.error({ err }, 'account signup failed');
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+router.post('/account/login', postLimiter, async (req, res) => {
+  try {
+    if (!(await accountsEnabled())) return res.status(403).json({ error: 'login disabled' });
+    const phone    = normalisePhone(req.body?.phone);
+    const password = String(req.body?.password || '');
+    if (!phone || !password) return res.status(400).json({ error: 'phone and password required' });
+
+    const acc = await db.queryOne('SELECT * FROM customer_accounts WHERE phone = ?', [phone]);
+    if (!acc) return res.status(401).json({ error: 'invalid phone or password' });
+    const ok = await bcrypt.compare(password, acc.password_hash);
+    if (!ok) return res.status(401).json({ error: 'invalid phone or password' });
+    if (acc.status !== 'approved') return res.status(403).json({ error: `account is ${acc.status}` });
+
+    await db.query('UPDATE customer_accounts SET last_login_at = NOW() WHERE id = ?', [acc.id]);
+    const token = signCustomerToken(acc);
+    res.json({
+      ok: true, token,
+      account: { id: acc.id, full_name: acc.full_name, phone: acc.phone, email: acc.email, status: acc.status },
+    });
+  } catch (err) {
+    logger.error({ err }, 'account login failed');
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+router.get('/account/me', requireCustomer, async (req, res) => {
+  try {
+    const acc = req.account;
+    const customer = acc.customer_id
+      ? await db.queryOne('SELECT id, customer_code, full_name, phone, email, telegram_id FROM customers WHERE id = ?', [acc.customer_id])
+      : null;
+
+    const subscriptions = acc.customer_id
+      ? await db.query(
+          `SELECT s.id, s.login_username, s.login_password, s.starts_at, s.expires_at,
+                  s.status, s.service_type, s.mt_synced, s.mac_address, s.bind_to_mac,
+                  p.name AS package_name, p.code AS package_code,
+                  p.rate_down_mbps, p.rate_up_mbps, p.duration_days, p.price
+             FROM subscriptions s
+             JOIN packages p ON p.id = s.package_id
+            WHERE s.customer_id = ?
+            ORDER BY s.expires_at DESC`,
+          [acc.customer_id]
+        )
+      : [];
+
+    const orders = acc.customer_id
+      ? await db.query(
+          `SELECT o.id, o.order_code, o.status, o.amount, o.created_at,
+                  p.name AS package_name, p.code AS package_code
+             FROM orders o JOIN packages p ON p.id = o.package_id
+            WHERE o.customer_id = ?
+            ORDER BY o.id DESC LIMIT 50`,
+          [acc.customer_id]
+        )
+      : [];
+
+    res.json({
+      account: acc,
+      customer,
+      subscriptions,
+      orders,
+    });
+  } catch (err) {
+    logger.error({ err }, 'account me failed');
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+router.post('/account/link', requireCustomer, postLimiter, async (req, res) => {
+  try {
+    const acc = req.account;
+    const orderCode = String(req.body?.order_code || '').toUpperCase().trim();
+    if (!orderCode) return res.status(400).json({ error: 'order_code required' });
+
+    const order = await db.queryOne(
+      'SELECT id, customer_id, phone FROM orders WHERE order_code = ?',
+      [orderCode]
+    );
+    if (!order) return res.status(404).json({ error: 'order not found' });
+    if (order.phone !== acc.phone) {
+      return res.status(403).json({ error: 'this order belongs to a different phone number' });
+    }
+    if (!order.customer_id) return res.status(400).json({ error: 'order not yet approved' });
+
+    await db.query(
+      'UPDATE customer_accounts SET customer_id = ? WHERE id = ?',
+      [order.customer_id, acc.id]
+    );
+    res.json({ ok: true, customer_id: order.customer_id });
+  } catch (err) {
+    logger.error({ err }, 'account link failed');
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+router.post('/account/change-package', requireCustomer, postLimiter, async (req, res) => {
+  try {
+    const acc = req.account;
+    if (!acc.customer_id) return res.status(400).json({ error: 'link an existing order first' });
+    const subId = Number(req.body?.subscription_id);
+    const newPkgCode = String(req.body?.new_package_code || '').trim();
+    if (!subId || !newPkgCode) return res.status(400).json({ error: 'subscription_id and new_package_code required' });
+
+    const sub = await db.queryOne(
+      'SELECT id, customer_id FROM subscriptions WHERE id = ?', [subId]
+    );
+    if (!sub || sub.customer_id !== acc.customer_id) return res.status(404).json({ error: 'subscription not found' });
+
+    const pkg = await db.queryOne(
+      'SELECT id, code, price, is_active FROM packages WHERE code = ?',
+      [newPkgCode]
+    );
+    if (!pkg || !pkg.is_active) return res.status(404).json({ error: 'package not available' });
+
+    const newCode = genOrderCode();
+    const r = await db.query(
+      `INSERT INTO orders
+         (order_code, package_id, customer_id, full_name, phone, amount,
+          renewal_of_subscription_id, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_payment')`,
+      [newCode, pkg.id, acc.customer_id, '(change)', acc.phone, pkg.price, subId]
+    );
+    notifyAdmins(
+      `🔁 Package change requested\n` +
+      `• Account: ${acc.full_name} (\`${acc.phone}\`)\n` +
+      `• Sub #${subId} → *${pkg.code}*\n` +
+      `• Order: \`${newCode}\``
+    ).catch(() => {});
+    res.json({ ok: true, order_id: r.insertId, order_code: newCode, amount: pkg.price });
+  } catch (err) {
+    logger.error({ err }, 'account change-package failed');
+    res.status(500).json({ error: 'internal error' });
   }
 });
 

@@ -228,6 +228,18 @@ export async function apiOpenVoucherBatchPrint(batchId) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+// ---------- Customer accounts (admin moderation) ----------
+export const apiCustomerAccounts = (status = 'pending') =>
+  api.get('/customer-accounts', { params: { status } }).then((r) => r.data.accounts);
+export const apiApproveAccount  = (id) => api.post(`/customer-accounts/${id}/approve`).then((r) => r.data);
+export const apiRejectAccount   = (id, reason) => api.post(`/customer-accounts/${id}/reject`, { reason }).then((r) => r.data);
+export const apiSuspendAccount  = (id) => api.post(`/customer-accounts/${id}/suspend`).then((r) => r.data);
+export const apiResetAccountPw  = (id, password) =>
+  api.post(`/customer-accounts/${id}/reset-password`, { password }).then((r) => r.data);
+
+export const apiRunExpiryReminders = () =>
+  api.post('/jobs/expiry-reminders/run').then((r) => r.data);
+
 // ---------- Notifications ----------
 export const apiNotifyChannels = () =>
   api.get('/notify/channels').then((r) => r.data.channels);

@@ -38,6 +38,54 @@ async function generateUniqueLogin(serviceType) {
 }
 
 /**
+ * Pick which MikroTik router a brand-new subscription should
+ * land on. Behaviour depends on the `provisioning.load_balance`
+ * (or legacy `feature.load_balance_routers`) setting:
+ *
+ *   disabled: use the router flagged `is_default`; fall back to
+ *             any active one; fall back to id=1 if the DB is
+ *             completely empty (`subscriptions.router_id` is
+ *             NOT NULL so we always need *something*).
+ *
+ *   enabled:  pick the active router with the fewest active
+ *             subscriptions right now — a simple "least-loaded"
+ *             strategy that works well for small ISPs without
+ *             needing live RouterOS polling on every order.
+ */
+export async function pickRouterForNewSubscription() {
+  const lb =
+    !!(await getSetting('provisioning.load_balance')) ||
+    !!(await getSetting('feature.load_balance_routers'));
+
+  if (lb) {
+    const row = await db.queryOne(
+      `SELECT r.id
+         FROM mikrotik_routers r
+         LEFT JOIN (
+           SELECT router_id, COUNT(*) AS c
+             FROM subscriptions
+            WHERE status = 'active'
+            GROUP BY router_id
+         ) s ON s.router_id = r.id
+        WHERE r.is_active = 1
+        ORDER BY COALESCE(s.c, 0) ASC, r.id ASC
+        LIMIT 1`
+    );
+    if (row?.id) return row.id;
+  }
+
+  const def = await db.queryOne(
+    'SELECT id FROM mikrotik_routers WHERE is_default = 1 AND is_active = 1 LIMIT 1'
+  );
+  if (def?.id) return def.id;
+
+  const any = await db.queryOne(
+    'SELECT id FROM mikrotik_routers WHERE is_active = 1 ORDER BY id ASC LIMIT 1'
+  );
+  return any?.id ?? 1;
+}
+
+/**
  * Find-or-create a customer record from order data.
  */
 export async function findOrCreateCustomer({ full_name, phone, telegram_id, telegram_username }) {
@@ -92,10 +140,7 @@ export async function approveOrderAndProvision({ orderId, adminId }) {
   }
 
   // ---- Fresh-subscription branch --------------------------------------
-  const router = await db.queryOne(
-    'SELECT * FROM mikrotik_routers WHERE is_default = 1 AND is_active = 1 LIMIT 1'
-  );
-  const routerId = router?.id ?? null;
+  const useRouterId = await pickRouterForNewSubscription();
 
   const customer = await findOrCreateCustomer({
     full_name: order.full_name,
@@ -108,17 +153,6 @@ export async function approveOrderAndProvision({ orderId, adminId }) {
 
   const now = new Date();
   const expires = new Date(now.getTime() + pkg.duration_days * 24 * 60 * 60 * 1000);
-
-  // subscriptions.router_id is NOT NULL. If no default router exists yet,
-  // fall back to any active router; if there's none at all, fall back to
-  // the placeholder router created by the initial migration (id=1).
-  let useRouterId = routerId;
-  if (!useRouterId) {
-    const anyRouter = await db.queryOne(
-      'SELECT id FROM mikrotik_routers WHERE is_active = 1 ORDER BY id ASC LIMIT 1'
-    );
-    useRouterId = anyRouter?.id ?? 1;
-  }
 
   const bindThis = !!(orderMac && bindDefault);
 
@@ -140,7 +174,7 @@ export async function approveOrderAndProvision({ orderId, adminId }) {
   let mtSynced = false;
   let mtError = null;
   try {
-    const mt = await getMikrotikClient(routerId);
+    const mt = await getMikrotikClient(useRouterId);
     const comment = `SKYNITY: ${customer.customer_code} / ${customer.full_name} / pkg=${pkg.code}${bindThis ? ` / mac=${orderMac}` : ''}`;
 
     if (pkg.service_type === 'pppoe') {

@@ -10,6 +10,8 @@ import cron from 'node-cron';
 import db from '../database/pool.js';
 import { expireSubscription } from '../services/provisioning.js';
 import { getMikrotikClient } from '../mikrotik/client.js';
+import { getSetting } from '../services/settings.js';
+import notifier from '../services/notifier.js';
 import logger from '../utils/logger.js';
 
 async function retryUnsyncedSubs() {
@@ -108,11 +110,113 @@ async function refreshLastSeen() {
   }
 }
 
+// ============================================================
+// Auto-expiry reminders
+// ------------------------------------------------------------
+// Runs once a day (08:00 Asia/Dhaka by default) and walks every
+// active subscription that will expire within the next N days.
+// "N days" comes from the `notify.expiry.days_before` setting —
+// a comma list like "3,1,0". For each matching step we deliver
+// one reminder via the notifier (respecting all channel toggles
+// and the customer's preferred channel) and record the step in
+// `last_expiry_notified_days` so we never re-send the same one.
+// ============================================================
+async function sendExpiryReminders() {
+  const enabledFeature = !!(await getSetting('feature.expiry_reminders'));
+  const enabledNotify  = !!(await getSetting('notify.expiry.enabled'));
+  if (!enabledFeature || !enabledNotify) return;
+
+  const daysRaw = String((await getSetting('notify.expiry.days_before')) || '3,1,0');
+  const stepList = [...new Set(
+    daysRaw.split(',')
+      .map((s) => Number(String(s).trim()))
+      .filter((n) => Number.isFinite(n) && n >= 0 && n <= 30)
+  )].sort((a, b) => b - a); // largest step first (3, 1, 0)
+  if (!stepList.length) return;
+
+  const maxStep = stepList[0];
+  const siteName = (await getSetting('site.name')) || 'Skynity';
+  const publicBase = (await getSetting('site.public_base_url')) || '';
+
+  // All active subs expiring within the window.
+  const candidates = await db.query(
+    `SELECT s.id, s.expires_at, s.last_expiry_notified_days,
+            s.login_username, s.login_password,
+            c.id AS customer_id, c.full_name, c.phone, c.telegram_id,
+            p.name AS package_name, p.code AS package_code, p.price
+       FROM subscriptions s
+       JOIN customers c ON c.id = s.customer_id
+       JOIN packages  p ON p.id = s.package_id
+      WHERE s.status = 'active'
+        AND s.expires_at > NOW()
+        AND s.expires_at <= NOW() + INTERVAL ? DAY`,
+    [maxStep]
+  );
+
+  const now = Date.now();
+  for (const sub of candidates) {
+    const expires = new Date(sub.expires_at).getTime();
+    const daysLeft = Math.max(0, Math.floor((expires - now) / 86400000));
+
+    // Find the largest step that still applies (daysLeft <= step)
+    // and that we haven't already sent.
+    const step = stepList.find((s) => daysLeft <= s);
+    if (step === undefined) continue;
+    if (sub.last_expiry_notified_days !== null && sub.last_expiry_notified_days <= step) {
+      // already sent this step (or a smaller/more urgent one).
+      continue;
+    }
+
+    const renewUrl = publicBase
+      ? `${publicBase.replace(/\/$/, '')}/portal/renew?sub=${sub.id}&phone=${encodeURIComponent(sub.phone)}`
+      : `/portal/renew?sub=${sub.id}&phone=${encodeURIComponent(sub.phone)}`;
+
+    const urgency = step === 0 ? 'TODAY' : `in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`;
+    const lines = [
+      `Hi ${sub.full_name || 'there'},`,
+      ``,
+      `Your ${siteName} *${sub.package_name}* package expires *${urgency}* (${new Date(sub.expires_at).toLocaleString()}).`,
+      ``,
+      `Renew in one tap:`,
+      renewUrl,
+      ``,
+      `Username: ${sub.login_username}`,
+    ];
+    const message = lines.join('\n');
+
+    try {
+      const out = await notifier.notifyCustomer({
+        customerId: sub.customer_id,
+        phone: sub.phone,
+        telegramId: sub.telegram_id,
+        message,
+        purpose: 'expiry',
+        relatedSubscriptionId: sub.id,
+      });
+      await db.query(
+        `UPDATE subscriptions
+            SET last_expiry_notified_days = ?, last_expiry_notified_at = NOW()
+          WHERE id = ?`,
+        [daysLeft, sub.id]
+      );
+      logger.info({ subscriptionId: sub.id, daysLeft, channel: out.channel, ok: out.ok }, 'expiry reminder');
+    } catch (err) {
+      logger.warn({ err: err.message, subscriptionId: sub.id }, 'expiry reminder failed');
+    }
+  }
+}
+
 export function startJobs() {
   cron.schedule('*/5 * * * *', () => retryUnsyncedSubs().catch((e) => logger.error({ e }, 'retry job')));
   cron.schedule('*/15 * * * *', () => expireDueSubs().catch((e) => logger.error({ e }, 'expire job')));
-  cron.schedule('0 * * * *', () => refreshLastSeen().catch((e) => logger.error({ e }, 'monitor job')));
+  cron.schedule('0 * * * *',    () => refreshLastSeen().catch((e) => logger.error({ e }, 'monitor job')));
+  // Once a day — 08:00 local (TZ comes from the container / env).
+  cron.schedule('0 8 * * *',    () => sendExpiryReminders().catch((e) => logger.error({ e }, 'expiry reminder job')));
   logger.info('cron jobs scheduled');
 }
 
-export default { startJobs };
+// Exposed so an admin can trigger a run manually from the UI
+// (e.g. after configuring settings the first time).
+export { sendExpiryReminders };
+
+export default { startJobs, sendExpiryReminders };

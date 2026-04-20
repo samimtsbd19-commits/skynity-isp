@@ -37,6 +37,43 @@ export function requireRole(...roles) {
   };
 }
 
+// ============================================================
+// Customer-account (portal) auth
+// ------------------------------------------------------------
+// Separate from admin auth. Tokens carry `kind: 'customer'` so
+// a leaked token can't be misused against admin endpoints.
+// ============================================================
+export function signCustomerToken(account) {
+  return jwt.sign(
+    { id: account.id, customer_id: account.customer_id, kind: 'customer' },
+    config.JWT_SECRET,
+    { expiresIn: '30d' }
+  );
+}
+
+export async function requireCustomer(req, res, next) {
+  try {
+    const auth = req.headers.authorization || '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    if (!token) return res.status(401).json({ error: 'missing token' });
+    const payload = jwt.verify(token, config.JWT_SECRET);
+    if (payload.kind !== 'customer') return res.status(401).json({ error: 'wrong token type' });
+    const acc = await db.queryOne(
+      `SELECT id, customer_id, full_name, phone, email, status
+         FROM customer_accounts WHERE id = ?`,
+      [payload.id]
+    );
+    if (!acc) return res.status(401).json({ error: 'account not found' });
+    if (acc.status !== 'approved') {
+      return res.status(403).json({ error: `account is ${acc.status}` });
+    }
+    req.account = acc;
+    next();
+  } catch (err) {
+    res.status(401).json({ error: 'invalid token' });
+  }
+}
+
 /** For WebSocket: validate JWT string and load admin (or null). */
 export async function getAdminFromToken(token) {
   if (!token) return null;
