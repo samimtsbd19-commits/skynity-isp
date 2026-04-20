@@ -33,6 +33,8 @@
   "nav.packages": "Packages",
   "nav.routers": "Routers",
   "nav.monitoring": "Monitoring",
+  "nav.liveSessions": "Live sessions",
+  "nav.routerMonitor": "Router monitor",
   "nav.health": "Health & alerts",
   "nav.configs": "Configs",
   "nav.settings": "Settings",

@@ -104,6 +104,129 @@ router.get('/routers/:id/history', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ----- Per-interface history (bandwidth + SFP) ------------------
+// Returns a time-series for ONE interface on ONE router. Used by
+// the monitoring page to draw rx/tx charts AND an SFP Rx/Tx power
+// line when the port is an SFP.
+router.get('/routers/:id/interface-history', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const iface = String(req.query.iface || '').trim();
+    if (!iface) return res.status(400).json({ error: 'iface query-param required' });
+    const hours = Math.min(168, Math.max(1, Number(req.query.hours) || 24));
+    const rows = await db.query(
+      `SELECT taken_at, rx_bps, tx_bps, rx_total, tx_total, link_ok,
+              sfp_rx_power, sfp_tx_power, sfp_temp
+         FROM router_interface_metrics
+        WHERE router_id = ? AND interface_name = ?
+          AND taken_at >= NOW() - INTERVAL ? HOUR
+        ORDER BY id ASC`,
+      [id, iface, hours]
+    );
+    res.json({ iface, hours, rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ----- Queue history ---------------------------------------------
+// Two modes:
+//   * Without ?queue= : returns the "top N" queues right now, with
+//     a small rx/tx bps series for each. Good for the dashboard.
+//   * With ?queue=NAME : returns the full rx/tx history for that one
+//     queue. Good for drilldown.
+router.get('/routers/:id/queue-history', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const hours = Math.min(168, Math.max(1, Number(req.query.hours) || 24));
+    const q = req.query.queue ? String(req.query.queue) : null;
+
+    if (q) {
+      const rows = await db.query(
+        `SELECT taken_at, rx_bps, tx_bps, rx_bytes, tx_bytes, dropped_in, dropped_out
+           FROM router_queue_metrics
+          WHERE router_id = ? AND queue_name = ?
+            AND taken_at >= NOW() - INTERVAL ? HOUR
+          ORDER BY id ASC`,
+        [id, q, hours]
+      );
+      return res.json({ queue: q, rows });
+    }
+
+    // Top-N queues by *current* traffic — the most recent row per queue.
+    const latest = await db.query(
+      `SELECT m.*
+         FROM router_queue_metrics m
+         JOIN (
+           SELECT queue_name, MAX(id) AS mx
+             FROM router_queue_metrics
+            WHERE router_id = ?
+              AND taken_at >= NOW() - INTERVAL 15 MINUTE
+            GROUP BY queue_name
+         ) x ON x.mx = m.id
+        ORDER BY (COALESCE(m.rx_bps,0) + COALESCE(m.tx_bps,0)) DESC
+        LIMIT 20`,
+      [id]
+    );
+    res.json({ queues: latest });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ----- Top bandwidth consumers (last 24h) ------------------------
+// Aggregates `usage_snapshots` deltas per subscription and joins
+// the customer + package so the UI can show "Top 10 users this
+// day". Used on the per-router dashboard.
+router.get('/routers/:id/top-users', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const hours = Math.min(168, Math.max(1, Number(req.query.hours) || 24));
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
+    const rows = await db.query(
+      `SELECT s.id AS subscription_id, s.login_username, s.service_type,
+              c.full_name, c.phone,
+              p.name AS package_name, p.code AS package_code,
+              SUM(u.delta_in)  AS bytes_in,
+              SUM(u.delta_out) AS bytes_out,
+              SUM(u.delta_in + u.delta_out) AS total_bytes
+         FROM usage_snapshots u
+         JOIN subscriptions s ON s.id = u.subscription_id
+         JOIN customers c     ON c.id = s.customer_id
+         JOIN packages  p     ON p.id = s.package_id
+        WHERE u.router_id = ?
+          AND u.taken_at >= NOW() - INTERVAL ? HOUR
+        GROUP BY s.id
+        ORDER BY total_bytes DESC
+        LIMIT ?`,
+      [id, hours, limit]
+    );
+    res.json({ hours, rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ----- Per-subscription daily traffic (for PPPoE user graph) -----
+// Buckets `usage_snapshots` into hourly or daily totals. Used when
+// an admin clicks a user on the top-N list to drill in.
+router.get('/subscriptions/:id/usage-history', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const hours = Math.min(720, Math.max(1, Number(req.query.hours) || 24));
+    const bucket = hours <= 48 ? 'hour' : 'day';
+    const grp = bucket === 'hour'
+      ? "DATE_FORMAT(taken_at, '%Y-%m-%d %H:00:00')"
+      : "DATE(taken_at)";
+    const rows = await db.query(
+      `SELECT ${grp} AS bucket,
+              SUM(delta_in)  AS bytes_in,
+              SUM(delta_out) AS bytes_out
+         FROM usage_snapshots
+        WHERE subscription_id = ?
+          AND taken_at >= NOW() - INTERVAL ? HOUR
+        GROUP BY bucket
+        ORDER BY bucket ASC`,
+      [id, hours]
+    );
+    res.json({ bucket, rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.get('/routers/:id/ping-history', async (req, res) => {
   try {
     const id = Number(req.params.id);

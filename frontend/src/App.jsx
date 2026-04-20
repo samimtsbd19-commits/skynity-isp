@@ -10,6 +10,7 @@ import Customers from './pages/Customers';
 import CustomerDetail from './pages/CustomerDetail';
 import Subscriptions from './pages/Subscriptions';
 import Monitoring from './pages/Monitoring';
+import RouterMonitor from './pages/RouterMonitor';
 import Packages from './pages/Packages';
 import Routers from './pages/Routers';
 import Activity from './pages/Activity';
@@ -69,6 +70,7 @@ export default function App() {
               <Route path="customer-accounts" element={<CustomerAccounts />} />
               <Route path="subscriptions" element={<Subscriptions />} />
               <Route path="monitoring" element={<Monitoring />} />
+              <Route path="router-monitor" element={<RouterMonitor />} />
               <Route path="health" element={<Health />} />
               <Route path="packages" element={<Packages />} />
               <Route path="vouchers" element={<Vouchers />} />

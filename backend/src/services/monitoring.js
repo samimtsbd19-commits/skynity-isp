@@ -229,6 +229,85 @@ export async function sampleNeighbors(router) {
 }
 
 // ============================================================
+// Sample every queue (simple + tree) for bandwidth & drops.
+// ------------------------------------------------------------
+// RouterOS returns cumulative byte counters for each queue;
+// admins care about "how fast is this queue going right now"
+// and "how much has it moved today". We keep both by computing
+// per-tick deltas and also writing the raw cumulative bytes.
+// ============================================================
+export async function sampleQueues(router) {
+  const enabled = await getSetting('monitoring.queue_poll_enabled');
+  if (enabled === false || enabled === 'false') return { ok: true, skipped: 'disabled' };
+
+  const mt = await getMikrotikClient(router.id);
+  const limit = Math.max(1, Number(await getSetting('monitoring.queue_poll_limit')) || 50);
+  try {
+    const [simple, tree] = await Promise.all([
+      mt.listSimpleQueues().catch(() => []),
+      mt.listQueueTree().catch(() => []),
+    ]);
+
+    // RouterOS returns "X/Y" pairs for counters on simple queues
+    // (rx / tx). Split once and keep them numeric.
+    const splitPair = (v) => {
+      if (!v) return [null, null];
+      const parts = String(v).split('/');
+      return [num(parts[0]), num(parts[1])];
+    };
+
+    const rows = [];
+    for (const q of simple) {
+      const [rxByte, txByte] = splitPair(q.bytes);
+      const [pIn, pOut]      = splitPair(q.packets);
+      const [dIn, dOut]      = splitPair(q.dropped);
+      const [rxBps, txBps]   = splitPair(q.rate);
+      rows.push({
+        kind: 'simple',
+        name: q.name, target: q.target || null, parent: null,
+        rxByte, txByte, pIn, pOut, dIn, dOut, rxBps, txBps,
+        disabled: q.disabled === 'true' ? 1 : 0,
+      });
+    }
+    for (const q of tree) {
+      rows.push({
+        kind: 'tree',
+        name: q.name, target: null, parent: q.parent || null,
+        rxByte: num(q.bytes), txByte: null,
+        pIn: num(q.packets), pOut: null,
+        dIn: num(q.dropped), dOut: null,
+        rxBps: num(q.rate), txBps: null,
+        disabled: q.disabled === 'true' ? 1 : 0,
+      });
+    }
+
+    // Rank by current rate so busy routers don't explode the table.
+    rows.sort((a, b) => (Number(b.rxBps || 0) + Number(b.txBps || 0))
+                     - (Number(a.rxBps || 0) + Number(a.txBps || 0)));
+    const keep = rows.slice(0, limit);
+
+    for (const r of keep) {
+      await db.query(
+        `INSERT INTO router_queue_metrics
+           (router_id, kind, queue_name, target, parent,
+            rx_bps, tx_bps, rx_bytes, tx_bytes,
+            packets_in, packets_out, dropped_in, dropped_out, disabled)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          router.id, r.kind, r.name, r.target, r.parent,
+          r.rxBps, r.txBps, r.rxByte, r.txByte,
+          r.pIn, r.pOut, r.dIn, r.dOut, r.disabled,
+        ]
+      );
+    }
+    return { ok: true, count: keep.length };
+  } catch (err) {
+    logger.warn({ err: err.message, router_id: router.id }, 'sampleQueues failed');
+    return { ok: false, error: err.message };
+  }
+}
+
+// ============================================================
 // Refresh static info (board, RouterOS version, license, …).
 // Runs once a day — not every tick.
 // ============================================================
@@ -294,6 +373,7 @@ export async function pollAllRouters() {
       interfaces: await sampleInterfaces(r),
       ping:       await samplePing(r),
       neighbors:  await sampleNeighbors(r),
+      queues:     await sampleQueues(r),
     });
   }
   return { ok: true, routers: results.length };
@@ -304,10 +384,16 @@ export async function pollAllRouters() {
 // ============================================================
 export async function pruneMetrics() {
   const days = Math.max(1, Number(await getSetting('monitoring.retention_days')) || 30);
-  const tables = ['router_metrics', 'router_interface_metrics', 'router_ping_metrics'];
-  for (const t of tables) {
+  const qDays = Math.max(1, Number(await getSetting('monitoring.queue_retention_days')) || 14);
+  const schedule = [
+    ['router_metrics', days],
+    ['router_interface_metrics', days],
+    ['router_ping_metrics', days],
+    ['router_queue_metrics', qDays],
+  ];
+  for (const [t, d] of schedule) {
     try {
-      await db.query(`DELETE FROM ${t} WHERE taken_at < NOW() - INTERVAL ? DAY LIMIT 10000`, [days]);
+      await db.query(`DELETE FROM ${t} WHERE taken_at < NOW() - INTERVAL ? DAY LIMIT 10000`, [d]);
     } catch (err) {
       logger.warn({ err: err.message, table: t }, 'prune failed');
     }
@@ -315,6 +401,6 @@ export async function pruneMetrics() {
 }
 
 export default {
-  sampleRouter, sampleInterfaces, samplePing, sampleNeighbors,
+  sampleRouter, sampleInterfaces, samplePing, sampleNeighbors, sampleQueues,
   refreshDeviceInfo, pollAllRouters, pruneMetrics,
 };

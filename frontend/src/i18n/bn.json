@@ -33,6 +33,8 @@
   "nav.packages": "প্যাকেজ",
   "nav.routers": "রাউটার",
   "nav.monitoring": "মনিটরিং",
+  "nav.liveSessions": "লাইভ সেশন",
+  "nav.routerMonitor": "রাউটার মনিটর",
   "nav.health": "হেলথ ও অ্যালার্ট",
   "nav.configs": "কনফিগ",
   "nav.settings": "সেটিংস",

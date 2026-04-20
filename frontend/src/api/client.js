@@ -256,6 +256,14 @@ export const apiMonitorAddPingTarget = (id, data) =>
 export const apiMonitorDelPingTarget = (tid) =>
   api.delete(`/monitoring/ping-targets/${tid}`).then((r) => r.data);
 export const apiMonitorPollNow       = () => api.post('/monitoring/poll-now').then((r) => r.data);
+export const apiMonitorIfaceHistory  = (id, iface, hours = 24) =>
+  api.get(`/monitoring/routers/${id}/interface-history`, { params: { iface, hours } }).then((r) => r.data);
+export const apiMonitorQueueHistory  = (id, { queue, hours = 24 } = {}) =>
+  api.get(`/monitoring/routers/${id}/queue-history`, { params: { queue, hours } }).then((r) => r.data);
+export const apiMonitorTopUsers      = (id, { hours = 24, limit = 10 } = {}) =>
+  api.get(`/monitoring/routers/${id}/top-users`, { params: { hours, limit } }).then((r) => r.data.rows);
+export const apiMonitorSubUsage      = (subId, hours = 24) =>
+  api.get(`/monitoring/subscriptions/${subId}/usage-history`, { params: { hours } }).then((r) => r.data);
 
 // ---------- Events / alerts ------------------------------------
 export const apiEvents          = (status = 'open') =>
