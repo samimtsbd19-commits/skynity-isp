@@ -11,6 +11,7 @@ import updatesRouter from './updates.js';
 import settingsRouter from './settings.js';
 import adminsRouter from './admins.js';
 import routersRouter from './routers.js';
+import portalRouter from './portal.js';
 
 const router = Router();
 
@@ -22,6 +23,9 @@ router.use('/updates',  updatesRouter);
 router.use('/settings', settingsRouter);
 router.use('/admins',   adminsRouter);
 router.use('/routers-admin', routersRouter);
+
+// PUBLIC (no auth) — self-service customer portal
+router.use('/portal',   portalRouter);
 
 /** `?routerId=1` selects DB router; omit or invalid → env default (primary). */
 function routerIdFromQuery(q) {

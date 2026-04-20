@@ -20,6 +20,7 @@ import Scripts from './pages/Scripts';
 import Updates from './pages/Updates';
 import SystemSettings from './pages/SystemSettings';
 import Admins from './pages/Admins';
+import PublicPortal from './pages/PublicPortal';
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -43,6 +44,9 @@ export default function App() {
       <AuthProvider>
         <BrowserRouter>
           <Routes>
+            {/* Public self-service portal — no auth, no admin chrome */}
+            <Route path="/portal/*" element={<PublicPortal />} />
+
             <Route path="/login" element={<Login />} />
             <Route
               path="/"

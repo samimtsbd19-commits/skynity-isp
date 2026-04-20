@@ -548,4 +548,21 @@ export function startBot() {
   return bot;
 }
 
+/**
+ * Fire-and-forget broadcast to every TELEGRAM_ADMIN_IDS chat.
+ * Safe to call even when the bot is disabled — the stubbed
+ * `bot.sendMessage` in that case is a no-op.
+ */
+export async function notifyAdmins(text, opts = {}) {
+  if (!TELEGRAM_ADMIN_IDS || !TELEGRAM_ADMIN_IDS.length) return;
+  const payload = { parse_mode: 'Markdown', disable_web_page_preview: true, ...opts };
+  for (const id of TELEGRAM_ADMIN_IDS) {
+    try {
+      await bot.sendMessage(id, text, payload);
+    } catch (err) {
+      logger.warn({ err: err.message, id }, 'notifyAdmins send failed');
+    }
+  }
+}
+
 export default bot;

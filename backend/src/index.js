@@ -14,11 +14,20 @@ import { attachMonitorWebSocket } from './ws/monitor.js';
 
 const app = express();
 
-app.use(helmet());
+// helmet with captive-portal-friendly CSP (portal uses inline styles)
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+}));
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
-// ---------- API ----------
+// trust the reverse proxy (Coolify/Traefik/Caddy) so req.ip and
+// x-forwarded-for are honoured by the portal rate-limiter
+app.set('trust proxy', 1);
+
+// ---------- API (includes token-protected admin + public /portal) ----------
 app.use('/api', apiRoutes);
 
 // ---------- health ----------
