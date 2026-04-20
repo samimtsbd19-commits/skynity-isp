@@ -22,21 +22,24 @@ app.use(express.json({ limit: '2mb' }));
 app.use('/api', apiRoutes);
 
 // ---------- health ----------
+// Returns 200 as long as the DB is reachable; MikroTik state is informational only.
 app.get('/health', async (_req, res) => {
   const out = { status: 'ok', app: config.APP_NAME, ts: new Date().toISOString() };
   try {
     await db.query('SELECT 1');
     out.db = 'ok';
   } catch (e) {
+    out.status = 'degraded';
     out.db = 'error';
     out.db_error = e.message;
+    return res.status(503).json(out);
   }
   try {
     const mt = await getMikrotikClient();
     const info = await mt.ping();
     out.mikrotik = { status: 'ok', ...info };
   } catch (e) {
-    out.mikrotik = { status: 'error', error: e.message };
+    out.mikrotik = { status: 'not_configured', detail: e.message };
   }
   res.json(out);
 });
@@ -56,18 +59,19 @@ async function main() {
     process.exit(1);
   }
 
-  // bootstrap first admin from env (if no admins exist yet)
+  // bootstrap first admin (superadmin) on empty install
   try {
     const [row] = await db.query('SELECT COUNT(*) AS c FROM admins');
-    if (row.c === 0 && config.TELEGRAM_ADMIN_IDS.length > 0) {
+    if (row.c === 0) {
       const defaultPassword = 'admin123'; // WARNING: change after first login
       const hash = await bcrypt.hash(defaultPassword, 10);
+      const firstTgId = config.TELEGRAM_ADMIN_IDS[0] || null;
       await db.query(
         `INSERT INTO admins (username, password_hash, full_name, telegram_id, role, is_active)
          VALUES (?, ?, ?, ?, 'superadmin', 1)`,
-        ['admin', hash, 'Superadmin', config.TELEGRAM_ADMIN_IDS[0]]
+        ['admin', hash, 'Superadmin', firstTgId]
       );
-      logger.warn('bootstrapped admin user: username=admin password=admin123 — CHANGE IMMEDIATELY');
+      logger.warn('bootstrapped admin user: username=admin password=admin123 — CHANGE IMMEDIATELY after first login');
     }
   } catch (err) {
     logger.error({ err }, 'admin bootstrap failed');

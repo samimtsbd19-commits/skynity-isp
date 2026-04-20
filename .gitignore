@@ -1,6 +1,7 @@
 node_modules/
 .env
 .env.local
+.env.*.local
 *.log
 uploads/
 dist/
@@ -11,3 +12,7 @@ build/
 coverage/
 *.sqlite
 tmp/
+
+# Caddy local data (only created in standalone dev runs)
+caddy_data/
+caddy_config/

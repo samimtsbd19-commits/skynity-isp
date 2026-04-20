@@ -305,16 +305,37 @@ export class MikrotikClient {
 
 // ---------- factory that reads credentials from DB ----------
 import db from '../database/pool.js';
-import config from '../config/index.js';
+import config, { hasEnvMikrotik } from '../config/index.js';
 import { decrypt } from '../utils/crypto.js';
 
 /**
- * Get a MikroTik client for a given router id (defaults to env config).
- * In Phase 1 we read from env so admins can bootstrap without DB entry.
+ * Get a MikroTik client for a given router id. Resolution order:
+ *   1. If `routerId` provided: look it up in `mikrotik_routers`.
+ *   2. Else: use env-configured credentials if present.
+ *   3. Else: fall back to the default active router in the DB.
+ *   4. Else: throw a helpful error telling the admin to configure one.
  */
 export async function getMikrotikClient(routerId = null) {
-  if (!routerId) {
-    // bootstrap: use env
+  if (routerId) {
+    const router = await db.queryOne(
+      'SELECT * FROM mikrotik_routers WHERE id = ? AND is_active = 1',
+      [routerId]
+    );
+    if (!router) throw new Error(`Router ${routerId} not found or inactive`);
+    if (!router.password_enc || router.password_enc === 'placeholder') {
+      throw new Error(`Router ${routerId} has no credentials configured yet — open the Routers page and click Edit.`);
+    }
+    return new MikrotikClient({
+      host: router.host,
+      port: router.port,
+      username: router.username,
+      password: decrypt(router.password_enc),
+      useSsl: !!router.use_ssl,
+      rejectUnauthorized: false,
+    });
+  }
+
+  if (hasEnvMikrotik) {
     return new MikrotikClient({
       host: config.MIKROTIK_HOST,
       port: config.MIKROTIK_PORT,
@@ -325,17 +346,23 @@ export async function getMikrotikClient(routerId = null) {
     });
   }
 
-  const router = await db.queryOne('SELECT * FROM mikrotik_routers WHERE id = ? AND is_active = 1', [routerId]);
-  if (!router) throw new Error(`Router ${routerId} not found or inactive`);
+  const def = await db.queryOne(
+    'SELECT * FROM mikrotik_routers WHERE is_default = 1 AND is_active = 1 LIMIT 1'
+  );
+  if (def && def.password_enc && def.password_enc !== 'placeholder') {
+    return new MikrotikClient({
+      host: def.host,
+      port: def.port,
+      username: def.username,
+      password: decrypt(def.password_enc),
+      useSsl: !!def.use_ssl,
+      rejectUnauthorized: false,
+    });
+  }
 
-  return new MikrotikClient({
-    host: router.host,
-    port: router.port,
-    username: router.username,
-    password: decrypt(router.password_enc),
-    useSsl: !!router.use_ssl,
-    rejectUnauthorized: false,
-  });
+  throw new Error(
+    'No MikroTik router configured. Add one from the web UI (Routers → Add) or set MIKROTIK_HOST/USERNAME/PASSWORD in the environment.'
+  );
 }
 
 export default MikrotikClient;

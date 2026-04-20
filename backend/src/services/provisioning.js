@@ -76,7 +76,6 @@ export async function approveOrderAndProvision({ orderId, adminId }) {
   const router = await db.queryOne(
     'SELECT * FROM mikrotik_routers WHERE is_default = 1 AND is_active = 1 LIMIT 1'
   );
-  // router may be null in phase 1 (env-based); we allow that
   const routerId = router?.id ?? null;
 
   // 1) customer
@@ -93,9 +92,16 @@ export async function approveOrderAndProvision({ orderId, adminId }) {
   const now = new Date();
   const expires = new Date(now.getTime() + pkg.duration_days * 24 * 60 * 60 * 1000);
 
-  // In phase 1 routerId can be null, but we declared FK NOT NULL.
-  // We pick id=1 which is seeded. (Admin fixes connection details later.)
-  const useRouterId = routerId ?? 1;
+  // subscriptions.router_id is NOT NULL. If no default router exists yet,
+  // fall back to any active router; if there's none at all, fall back to
+  // the placeholder router created by the initial migration (id=1).
+  let useRouterId = routerId;
+  if (!useRouterId) {
+    const anyRouter = await db.queryOne(
+      'SELECT id FROM mikrotik_routers WHERE is_active = 1 ORDER BY id ASC LIMIT 1'
+    );
+    useRouterId = anyRouter?.id ?? 1;
+  }
 
   const subResult = await db.query(
     `INSERT INTO subscriptions

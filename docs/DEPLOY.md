@@ -1,6 +1,8 @@
-# 🛰️ Skynity ISP — Deployment Guide (Phase 1)
+# 🛰️ Skynity ISP — Deployment Guide
 
-Full ISP management system with **Telegram bot → Admin approval → Auto-provisioning** on MikroTik. VPS এ one-command deploy। পরবর্তী phases এ Web dashboard, Monitoring, Billing reports যুক্ত হবে।
+Full ISP management system with **Telegram bot → Admin approval → Auto-provisioning** on MikroTik. VPS এ one-command deploy। Caddy দিয়ে automatic HTTPS, Nginx দিয়ে static serve, সব container orchestrated।
+
+> 🚀 **Hostinger VPS user?** Docker Manager এ GitHub link দিয়ে এক ক্লিকে deploy এর জন্য **[HOSTINGER_DEPLOY.md](HOSTINGER_DEPLOY.md)** দেখুন।
 
 ---
 
@@ -65,8 +67,10 @@ mkdir -p ~/skynity && cd ~/skynity
 
 ### Step 5: `.env` file তৈরি
 
+Root এ single `.env` file — docker-compose এবং backend দুটাই এটা use করে:
+
 ```bash
-cd ~/skynity/skynity-isp/backend
+cd ~/skynity/skynity-isp
 cp .env.example .env
 nano .env
 ```
@@ -74,26 +78,36 @@ nano .env
 **গুরুত্বপূর্ণ fields fill করুন:**
 
 ```env
+DOMAIN=wifi.skynity.org
+ACME_EMAIL=admin@skynity.org
+
 DB_PASSWORD=এখানে-strong-password
 DB_ROOT_PASSWORD=আরেকটা-strong-password
 
 TELEGRAM_BOT_TOKEN=1234567890:AAxxxxxxxxxxxxxxxxx
 TELEGRAM_ADMIN_IDS=123456789
 
-# MikroTik - phase 2 এ VPN এর মাধ্যমে connect করব
-# এখনের জন্য placeholder দিলেও চলবে
-MIKROTIK_HOST=192.168.50.1
-MIKROTIK_USERNAME=api-user
-MIKROTIK_PASSWORD=strong-api-password
+# MikroTik — optional on first boot. পরে admin panel থেকে add করতে পারবেন।
+MIKROTIK_HOST=
+MIKROTIK_USERNAME=
+MIKROTIK_PASSWORD=
 
 BKASH_NUMBER=01XXXXXXXXX
 NAGAD_NUMBER=01XXXXXXXXX
 
-JWT_SECRET=$(openssl rand -hex 32)  # একটা random string generate করুন
-SESSION_SECRET=$(openssl rand -hex 32)
+JWT_SECRET=  # openssl rand -hex 32 দিয়ে generate করুন
+SESSION_SECRET=  # openssl rand -hex 32
 ```
 
 `Ctrl+O` → `Enter` → `Ctrl+X` দিয়ে save।
+
+> 💡 Quick secret generator:
+> ```bash
+> echo "JWT_SECRET=$(openssl rand -hex 32)"
+> echo "SESSION_SECRET=$(openssl rand -hex 32)"
+> echo "DB_PASSWORD=$(openssl rand -base64 24)"
+> echo "DB_ROOT_PASSWORD=$(openssl rand -base64 24)"
+> ```
 
 ### Step 6: MikroTik এ REST API enable করুন
 
@@ -135,11 +149,11 @@ add name=hs-5m rate-limit=5M/5M shared-users=1
 ### Step 8: Deploy
 
 ```bash
-cd ~/skynity/skynity-isp/docker
+cd ~/skynity/skynity-isp
 docker compose up -d --build
 ```
 
-প্রথমবার কিছুক্ষণ সময় লাগবে (image build + migrate)। 5 টা container start হবে: **mysql, redis, migrate, backend, frontend**।
+প্রথমবার কিছুক্ষণ সময় লাগবে (image build + migrate)। 6 টা container start হবে: **caddy, mysql, redis, migrate, backend, frontend**।
 
 ### Step 9: Verify
 
@@ -163,7 +177,9 @@ docker compose exec backend wget -qO- http://localhost:3000/health
 
 ### Step 10: ওয়েব Dashboard এ Login করুন
 
-Browser এ যান: **`http://YOUR_VPS_IP/`**
+Browser এ যান: **`https://YOUR_DOMAIN/`** (Caddy auto-fetches Let's Encrypt cert)
+
+> যদি domain না থাকে, `.env` এ `DOMAIN=YOUR_VPS_IP` দিয়ে `docker/Caddyfile` এর `{$DOMAIN}` লাইনটা `:80 {` এ বদলে দিন — plain HTTP এ চলবে।
 
 First-run credentials:
 - **Username:** `admin`
@@ -211,7 +227,7 @@ First-run credentials:
 
 ### Backend restart:
 ```bash
-cd ~/skynity/skynity-isp/docker
+cd ~/skynity/skynity-isp
 docker compose restart backend
 ```
 
@@ -250,7 +266,7 @@ Phase 1 এ শুধু Telegram ID দিয়ে admin check হয়। Ph
 
 ## 🔐 Security Recommendations
 
-1. **VPS Firewall:** Port 22 (SSH), 80 (web dashboard), 443 (future HTTPS) public রাখুন। 3000 (backend) এবং 3306 (MySQL) internal রাখুন (default এ compose এ expose করা নেই)।
+1. **VPS Firewall:** Port 22 (SSH), 80 (HTTP → auto-redirect to HTTPS), 443 (HTTPS) public রাখুন। 3000 (backend) এবং 3306 (MySQL) internal রাখুন (default এ compose এ expose করা নেই)। Port 80 **অবশ্যই** open রাখতে হবে — Let's Encrypt certificate renewal এর জন্য দরকার।
    ```bash
    sudo ufw allow 22
    sudo ufw allow 80
@@ -266,7 +282,7 @@ Phase 1 এ শুধু Telegram ID দিয়ে admin check হয়। Ph
 
 5. **`.env` file এর permissions:**
    ```bash
-   chmod 600 ~/skynity/skynity-isp/backend/.env
+   chmod 600 ~/skynity/skynity-isp/.env
    ```
 
 ---
@@ -275,6 +291,8 @@ Phase 1 এ শুধু Telegram ID দিয়ে admin check হয়। Ph
 
 ```
 skynity-isp/
+├── docker-compose.yml     # ← root: one-command deploy
+├── .env.example           # ← copy to .env, fill in values
 ├── backend/
 │   ├── src/
 │   │   ├── config/        # env validation
@@ -283,18 +301,25 @@ skynity-isp/
 │   │   ├── telegram/      # bot logic
 │   │   ├── services/      # provisioning, billing (core business logic)
 │   │   ├── jobs/          # cron jobs
-│   │   ├── routes/        # HTTP API routes (phase 3 এ বাড়বে)
+│   │   ├── routes/        # HTTP API routes
 │   │   ├── middleware/    # auth, validation
 │   │   ├── utils/         # logger, crypto helpers
+│   │   ├── ws/            # WebSocket live bandwidth
 │   │   └── index.js       # entry point
 │   ├── migrations/        # SQL migration files
 │   ├── Dockerfile
-│   ├── package.json
-│   └── .env.example
+│   └── package.json
+├── frontend/              # React dashboard (Vite + Tailwind)
+│   ├── src/
+│   ├── nginx.conf
+│   └── Dockerfile
 ├── docker/
-│   └── docker-compose.yml
+│   └── Caddyfile          # Auto-HTTPS reverse proxy
 └── docs/
-    └── DEPLOY.md          # ← you are here
+    ├── HOSTINGER_DEPLOY.md  # Hostinger one-click
+    ├── DEPLOY.md            # ← you are here
+    ├── WIREGUARD.md
+    └── ADMIN_COMMANDS.md
 ```
 
 ---

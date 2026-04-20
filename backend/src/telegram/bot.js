@@ -21,7 +21,19 @@ import { registerAdminCommands, handleAdminGuidedFlow } from './admin-commands.j
 
 const { TELEGRAM_BOT_TOKEN, TELEGRAM_ADMIN_IDS, BKASH_NUMBER, NAGAD_NUMBER, CURRENCY_SYMBOL, UPLOAD_DIR } = config;
 
-const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+// If TELEGRAM_BOT_TOKEN is missing, return a no-op proxy so module-level
+// handler registrations (bot.onText / bot.on / ...) don't crash the process.
+// Polling only actually starts in startBot() below.
+function createNullBot() {
+  const noop = async () => null;
+  return new Proxy({}, {
+    get() { return noop; },
+  });
+}
+
+const bot = TELEGRAM_BOT_TOKEN
+  ? new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false })
+  : createNullBot();
 
 const isAdmin = (tgId) => TELEGRAM_ADMIN_IDS.includes(String(tgId));
 
@@ -517,11 +529,22 @@ bot.onText(/^\/stats$/, async (msg) => {
 // Startup
 // ============================================================
 export function startBot() {
+  if (!TELEGRAM_BOT_TOKEN) {
+    logger.warn('TELEGRAM_BOT_TOKEN not set — Telegram bot disabled. Set it and restart to enable.');
+    return null;
+  }
+
   // Register all admin commands
   registerAdminCommands(bot, { isAdmin, setSession, getSession, clearSession, CURRENCY_SYMBOL });
 
-  logger.info({ admins: TELEGRAM_ADMIN_IDS.length }, 'Telegram bot started');
   bot.on('polling_error', (err) => logger.error({ err: err.message }, 'polling error'));
+
+  // Start polling now that all handlers are registered.
+  bot.startPolling().then(
+    () => logger.info({ admins: TELEGRAM_ADMIN_IDS.length }, 'Telegram bot started'),
+    (err) => logger.error({ err: err.message }, 'failed to start telegram polling')
+  );
+
   return bot;
 }
 

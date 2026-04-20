@@ -1,6 +1,35 @@
 # 📋 Skynity ISP — Changelog & Roadmap
 
-## ✅ Phase 4 — Complete (Current: v0.4)
+## ✅ v0.4.1 — Deploy hardening (current)
+
+### Hostinger-ready one-click deploy
+- **Root `docker-compose.yml`** with a single source of truth for all services
+- **Single `.env` at repo root** — no more split between `backend/.env` and
+  compose-level env, both read from the same file
+- **Caddy reverse proxy** added: automatic HTTPS via Let's Encrypt for any
+  configured `DOMAIN` (e.g. `wifi.skynity.org`) — no manual cert renewal
+- New **[`docs/HOSTINGER_DEPLOY.md`](docs/HOSTINGER_DEPLOY.md)** walkthrough
+  for Hostinger VPS → Docker Manager → GitHub one-click deploy
+- Backend container gets a proper `healthcheck`, MySQL + Redis too
+
+### Bug fixes
+- `MIKROTIK_*` env vars are now **optional** at boot — operators can add
+  routers entirely from the web UI (Routers → Add), no redeploy required
+- `TELEGRAM_ADMIN_IDS` optional — bootstrap admin user still created when
+  no Telegram IDs are set (previously the first admin was skipped)
+- Telegram bot no longer crashes the process at startup when the token is
+  missing or invalid — it now logs a warning and the rest of the system
+  (web dashboard, API, cron jobs) keeps running
+- `provisioning` falls back to any active router instead of hard-coded
+  `router_id = 1` when no default is configured
+- `/health` endpoint returns a proper 503 when DB is down but stays 200
+  when only MikroTik is unreachable (was previously always 200 — broke
+  container-level health checks)
+- Nginx now forwards the correct `X-Forwarded-Proto` from Caddy
+
+---
+
+## ✅ Phase 4 — Complete (v0.4)
 
 ### Config Files (VPS → MikroTik)
 - Upload `.rsc`, `.backup`, `.conf`, and script files to the VPS via admin panel
