@@ -6,8 +6,30 @@ import logger from '../utils/logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+async function waitForDatabase(pool, { maxAttempts = 30, delayMs = 2000 } = {}) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await pool.query('SELECT 1');
+      if (attempt > 1) logger.info({ attempt }, 'database reachable');
+      return;
+    } catch (err) {
+      if (attempt === maxAttempts) throw err;
+      logger.warn(
+        { attempt, maxAttempts, code: err.code },
+        'database not ready yet, retrying...',
+      );
+      await new Promise((res) => setTimeout(res, delayMs));
+    }
+  }
+}
+
 async function run() {
   const pool = getPool();
+
+  // Wait for MySQL TCP port to actually accept connections.
+  // Even with depends_on: service_healthy, some platforms declare
+  // the container healthy before network is fully bound.
+  await waitForDatabase(pool);
 
   // migrations table
   await pool.query(`

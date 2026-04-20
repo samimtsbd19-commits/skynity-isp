@@ -39,10 +39,18 @@ services:
       # NOTE: --default-authentication-plugin was REMOVED in MySQL 8.4.
       # caching_sha2_password is the default anyway.
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
-      interval: 10s
+      # Force TCP (not the Unix socket) so the check only passes when
+      # port 3306 is actually accepting network connections. Otherwise
+      # mysqladmin would greenlight the container before TCP bind is
+      # ready and dependent services (migrate) would hit ECONNREFUSED.
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -P 3306 --protocol=tcp -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent",
+        ]
+      interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 30
       start_period: 60s
 
   redis:

@@ -210,15 +210,6 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------- Seed data ---------------------------------------
-INSERT INTO mikrotik_routers (name, host, port, username, password_enc, use_ssl, is_default, note)
-VALUES ('Main Router', 'placeholder', 443, 'placeholder', 'placeholder', 1, 1,
-        'Configure via admin panel after first login')
-ON DUPLICATE KEY UPDATE name = name;
-
-INSERT INTO packages (code, name, service_type, rate_up_mbps, rate_down_mbps, duration_days, price, mikrotik_profile, description, sort_order) VALUES
-('HOTSPOT-2M-7D',  'Hotspot 2Mbps — 7 Days',   'hotspot', 2,  2,  7,  100.00, 'hs-2m',  '2 Mbps hotspot, 7 days validity',  10),
-('HOTSPOT-5M-30D', 'Hotspot 5Mbps — 30 Days',  'hotspot', 5,  5,  30, 300.00, 'hs-5m',  '5 Mbps hotspot, 30 days validity', 20),
-('PPPOE-5M-30D',   'PPPoE 5Mbps — 30 Days',    'pppoe',   5,  5,  30, 500.00, 'pppoe-5mb',  'Unshared 5 Mbps PPPoE, 30 days',  30),
-('PPPOE-10M-30D',  'PPPoE 10Mbps — 30 Days',   'pppoe',   10, 10, 30, 800.00, 'pppoe-10mb', 'Unshared 10 Mbps PPPoE, 30 days', 40),
-('PPPOE-20M-30D',  'PPPoE 20Mbps — 30 Days',   'pppoe',   20, 20, 30, 1500.00, 'pppoe-20mb', 'Unshared 20 Mbps PPPoE, 30 days', 50)
-ON DUPLICATE KEY UPDATE name = VALUES(name);
+-- NOTE: No seed for `mikrotik_routers` or `packages` on purpose.
+-- Admins add their real router and packages from the dashboard
+-- after first login. Keeps production deployments clean.
