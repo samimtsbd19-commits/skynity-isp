@@ -20,6 +20,7 @@ import Scripts from './pages/Scripts';
 import Updates from './pages/Updates';
 import SystemSettings from './pages/SystemSettings';
 import Admins from './pages/Admins';
+import Vouchers from './pages/Vouchers';
 import PublicPortal from './pages/PublicPortal';
 
 const qc = new QueryClient({
@@ -65,6 +66,7 @@ export default function App() {
               <Route path="subscriptions" element={<Subscriptions />} />
               <Route path="monitoring" element={<Monitoring />} />
               <Route path="packages" element={<Packages />} />
+              <Route path="vouchers" element={<Vouchers />} />
               <Route path="routers" element={<Routers />} />
               <Route path="configs" element={<Configs />} />
               <Route path="vpn" element={<Vpn />} />

@@ -183,6 +183,48 @@ export const apiAdminCreate = (data) => api.post('/admins', data).then((r) => r.
 export const apiAdminUpdate = (id, patch) => api.patch(`/admins/${id}`, patch).then((r) => r.data);
 export const apiAdminDelete = (id) => api.delete(`/admins/${id}`).then((r) => r.data);
 
+// ---------- Vouchers ----------
+export const apiVoucherBatches = () =>
+  api.get('/vouchers/batches').then((r) => r.data.batches);
+export const apiVouchers = (params = {}) =>
+  api.get('/vouchers', { params }).then((r) => r.data.vouchers);
+export const apiVoucherBatchCreate = (data) =>
+  api.post('/vouchers/batch', data).then((r) => r.data);
+export const apiVoucherBatchDelete = (id) =>
+  api.delete(`/vouchers/batches/${id}`).then((r) => r.data);
+export const apiVoucherDelete = (id) =>
+  api.delete(`/vouchers/${id}`).then((r) => r.data);
+export const apiVoucherBatchPrintUrl = (id) => `/api/vouchers/batches/${id}/print`;
+
+// ---------- Invoices ----------
+export async function apiOpenOrderInvoice(codeOrId) {
+  // fetch with auth, then open as blob URL (new-tab opens can't send Bearer
+  // headers, so we can't just link to /api/orders/:id/invoice).
+  const res = await api.get(`/orders/${codeOrId}/invoice`, { responseType: 'blob' });
+  const blob = new Blob([res.data], { type: 'text/html; charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const w = window.open(url, '_blank');
+  if (!w) {
+    const a = document.createElement('a');
+    a.href = url; a.target = '_blank'; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+export async function apiOpenVoucherBatchPrint(batchId) {
+  const res = await api.get(`/vouchers/batches/${batchId}/print`, { responseType: 'blob' });
+  const blob = new Blob([res.data], { type: 'text/html; charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const w = window.open(url, '_blank');
+  if (!w) {
+    const a = document.createElement('a');
+    a.href = url; a.target = '_blank'; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 // ---------- Router CRUD ----------
 export const apiRouterCreate = (data) => api.post('/routers-admin', data).then((r) => r.data);
 export const apiRouterUpdate = (id, patch) => api.patch(`/routers-admin/${id}`, patch).then((r) => r.data);

@@ -39,6 +39,8 @@ import config from '../config/index.js';
 import logger from '../utils/logger.js';
 import * as settings from '../services/settings.js';
 import { notifyAdmins } from '../telegram/bot.js';
+import vouchers from '../services/vouchers.js';
+import { renderInvoiceForOrder } from '../services/invoice.js';
 
 const router = Router();
 
@@ -318,6 +320,162 @@ router.get('/orders/:code', getLimiter, async (req, res) => {
   } catch (err) {
     logger.error({ err }, 'portal order status failed');
     res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// ============================================================
+// 5) POST /portal/vouchers/redeem
+//    body: { code, full_name?, phone? }
+//    → marks voucher redeemed, provisions subscription, returns creds
+// ============================================================
+router.post('/vouchers/redeem', postLimiter, async (req, res) => {
+  try {
+    const { code, full_name, phone } = req.body || {};
+    if (!code || String(code).trim().length < 4) {
+      return res.status(400).json({ error: 'voucher code required' });
+    }
+    const result = await vouchers.redeemVoucher({
+      code: String(code).trim(),
+      fullName: full_name,
+      phone: phone,
+    });
+
+    await db.query(
+      `INSERT INTO activity_log (actor_type, actor_id, action, entity_type, entity_id, meta, ip_address)
+       VALUES ('customer', ?, 'portal_voucher_redeemed', 'subscription', ?, ?, ?)`,
+      [
+        String(phone || '').slice(0, 40),
+        String(result.subscription.id),
+        JSON.stringify({ code: String(code).trim().toUpperCase(), package: result.package.code }),
+        clientIp(req),
+      ]
+    );
+
+    notifyAdmins(
+      `🎟 *Voucher redeemed*\n` +
+      `Code: \`${String(code).trim().toUpperCase()}\`\n` +
+      `Package: ${result.package.name}\n` +
+      `Customer: ${full_name || '-'} (${phone || '-'})\n` +
+      `Username: \`${result.subscription.login_username}\``
+    ).catch(() => {});
+
+    res.json(result);
+  } catch (err) {
+    const msg = err.message || 'internal error';
+    const code = /invalid|used|expired|required|not found/i.test(msg) ? 400 : 500;
+    if (code >= 500) logger.error({ err }, 'voucher redeem failed');
+    res.status(code).json({ error: msg });
+  }
+});
+
+// ============================================================
+// 6) GET /portal/vouchers/:code/info   (preview only, no redeem)
+// ============================================================
+router.get('/vouchers/:code/info', getLimiter, async (req, res) => {
+  try {
+    const code = String(req.params.code || '').toUpperCase().trim();
+    const v = await db.queryOne(
+      `SELECT v.code, v.is_redeemed, v.expires_at,
+              p.name AS package_name, p.code AS package_code,
+              p.rate_down_mbps, p.rate_up_mbps, p.duration_days, p.price, p.service_type
+         FROM vouchers v JOIN packages p ON p.id = v.package_id
+         WHERE v.code = ?`,
+      [code]
+    );
+    if (!v) return res.status(404).json({ error: 'invalid code' });
+    res.json({
+      code: v.code,
+      is_redeemed: !!v.is_redeemed,
+      expires_at: v.expires_at,
+      package: {
+        code: v.package_code,
+        name: v.package_name,
+        rate_down_mbps: v.rate_down_mbps,
+        rate_up_mbps: v.rate_up_mbps,
+        duration_days: v.duration_days,
+        price: Number(v.price),
+        service_type: v.service_type,
+      },
+    });
+  } catch (err) {
+    logger.error({ err }, 'voucher info failed');
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// ============================================================
+// 7) POST /portal/customer/login
+//    body: { phone, order_code }
+//    → looks up customer by phone + matches any order_code; returns
+//      that customer's active subscriptions (username/password, expiry)
+//      so returning customers can view their details without admin auth.
+// ============================================================
+router.post('/customer/login', postLimiter, async (req, res) => {
+  try {
+    const phone = normalisePhone(req.body?.phone);
+    const orderCode = String(req.body?.order_code || '').toUpperCase().trim();
+    if (!phone || !orderCode) {
+      return res.status(400).json({ error: 'phone and order_code required' });
+    }
+    const order = await db.queryOne(
+      `SELECT o.* FROM orders o WHERE o.order_code = ? AND o.phone = ?`,
+      [orderCode, phone]
+    );
+    if (!order) return res.status(404).json({ error: 'no match — check phone and order code' });
+
+    const customer = order.customer_id
+      ? await db.queryOne('SELECT id, full_name, phone, customer_code FROM customers WHERE id = ?', [order.customer_id])
+      : null;
+
+    const subs = customer
+      ? await db.query(
+          `SELECT s.id, s.login_username, s.login_password, s.starts_at, s.expires_at,
+                  s.status, s.service_type, s.mt_synced,
+                  p.name AS package_name, p.code AS package_code,
+                  p.rate_down_mbps, p.rate_up_mbps, p.duration_days, p.price
+             FROM subscriptions s JOIN packages p ON p.id = s.package_id
+             WHERE s.customer_id = ? ORDER BY s.expires_at DESC`,
+          [customer.id]
+        )
+      : [];
+
+    res.json({
+      ok: true,
+      customer,
+      order: {
+        order_code: order.order_code,
+        status: order.status,
+        amount: Number(order.amount),
+      },
+      subscriptions: subs,
+    });
+  } catch (err) {
+    logger.error({ err }, 'customer login failed');
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// ============================================================
+// 8) GET /portal/orders/:code/invoice?phone=01xx
+//    Public invoice — phone must match the one on the order.
+// ============================================================
+router.get('/orders/:code/invoice', getLimiter, async (req, res) => {
+  try {
+    const code = String(req.params.code || '').toUpperCase().trim();
+    const phone = normalisePhone(req.query.phone);
+    if (!phone) return res.status(400).send('phone required');
+    const order = await db.queryOne(
+      'SELECT id, phone FROM orders WHERE order_code = ?',
+      [code]
+    );
+    if (!order || order.phone !== phone) return res.status(404).send('not found');
+    const html = await renderInvoiceForOrder(order.id);
+    if (!html) return res.status(404).send('not found');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err) {
+    logger.error({ err }, 'portal invoice failed');
+    res.status(500).send('error');
   }
 });
 

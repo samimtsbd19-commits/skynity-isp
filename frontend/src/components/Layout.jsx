@@ -3,30 +3,38 @@ import {
   LayoutDashboard, Users, Inbox, Package, Radio,
   Activity, Router as RouterIcon, LogOut, Satellite,
   ScrollText, Settings, FileCode, Shield, Terminal,
-  RefreshCw, UserCog, Cog,
+  RefreshCw, UserCog, Cog, Ticket,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
 import { useSelectedRouter } from '../contexts/RouterContext';
-import { apiStats } from '../api/client';
+import { apiStats, apiSettings } from '../api/client';
 import clsx from 'clsx';
+import { useEffect, useMemo } from 'react';
 
+// Sidebar navigation. Grouped by purpose:
+//   - customer lifecycle   (Overview, Orders, Customers, Subscriptions, Vouchers)
+//   - network operations   (Live Sessions, Packages, Routers, Configs, VPN, Scripts, Updates)
+//   - admin / plumbing     (Admin users, System, Activity, Profile)
 const nav = [
-  { to: '/', label: 'Overview',    icon: LayoutDashboard, end: true },
-  { to: '/orders', label: 'Inbox', icon: Inbox, badge: 'pending' },
-  { to: '/customers', label: 'Customers', icon: Users },
+  { to: '/',              label: 'Overview',      icon: LayoutDashboard, end: true },
+  { to: '/orders',        label: 'Orders',        icon: Inbox,           badge: 'pending' },
+  { to: '/customers',     label: 'Customers',     icon: Users },
   { to: '/subscriptions', label: 'Subscriptions', icon: Activity },
-  { to: '/monitoring', label: 'Live Sessions', icon: Radio },
-  { to: '/packages', label: 'Packages', icon: Package },
-  { to: '/routers', label: 'Routers', icon: RouterIcon },
-  { to: '/configs', label: 'Configs', icon: FileCode },
-  { to: '/vpn', label: 'VPN', icon: Shield },
-  { to: '/scripts', label: 'Scripts', icon: Terminal },
-  { to: '/updates', label: 'Updates', icon: RefreshCw },
-  { to: '/admins', label: 'Admin users', icon: UserCog },
-  { to: '/system', label: 'System', icon: Cog },
-  { to: '/activity', label: 'Activity', icon: ScrollText },
-  { to: '/settings', label: 'Profile', icon: Settings },
+  { to: '/vouchers',      label: 'Vouchers',      icon: Ticket },
+
+  { to: '/monitoring', label: 'Live Sessions', icon: Radio,    section: 'Network' },
+  { to: '/packages',   label: 'Packages',      icon: Package },
+  { to: '/routers',    label: 'Routers',       icon: RouterIcon },
+  { to: '/configs',    label: 'Configs',       icon: FileCode },
+  { to: '/vpn',        label: 'VPN',           icon: Shield },
+  { to: '/scripts',    label: 'Scripts',       icon: Terminal },
+  { to: '/updates',    label: 'Updates',       icon: RefreshCw },
+
+  { to: '/admins',   label: 'Admin users', icon: UserCog,    section: 'Admin' },
+  { to: '/system',   label: 'System',      icon: Cog },
+  { to: '/activity', label: 'Activity',    icon: ScrollText },
+  { to: '/settings', label: 'Profile',     icon: Settings },
 ];
 
 export default function Layout() {
@@ -40,6 +48,32 @@ export default function Layout() {
 
   const pendingCount = stats?.pendingOrders ?? 0;
 
+  // ---- Branding (logo, primary colour, site name) --------------
+  // Read once per session and apply as a CSS variable so existing
+  // utility classes can still use `text-amber` / `bg-amber` but the
+  // user can override the accent from System Settings without a
+  // frontend rebuild.
+  const { data: settingsRows } = useQuery({
+    queryKey: ['settings-branding'],
+    queryFn: apiSettings,
+    staleTime: 5 * 60_000,
+  });
+  const branding = useMemo(() => {
+    const map = {};
+    (settingsRows || []).forEach((r) => { map[r.key] = r.value; });
+    return {
+      name:  map['site.name']              || 'Skynity',
+      logo:  map['branding.logo_url']      || '',
+      color: map['branding.primary_color'] || '',
+    };
+  }, [settingsRows]);
+
+  useEffect(() => {
+    if (branding.color) {
+      document.documentElement.style.setProperty('--brand-accent', branding.color);
+    }
+  }, [branding.color]);
+
   return (
     <div className="min-h-screen flex text-text">
       {/* ─────────── Sidebar ─────────── */}
@@ -49,12 +83,18 @@ export default function Layout() {
         {/* brand */}
         <div className="relative px-5 py-5 border-b border-border-dim">
           <div className="flex items-center gap-2.5">
-            <div className="relative">
-              <Satellite size={18} className="text-amber" strokeWidth={1.5} />
-              <span className="absolute -inset-1 bg-amber/20 blur-md -z-10 rounded-full" />
+            <div className="relative shrink-0">
+              {branding.logo ? (
+                <img src={branding.logo} alt="" className="w-7 h-7 object-contain rounded-sm" />
+              ) : (
+                <>
+                  <Satellite size={18} className="text-amber" strokeWidth={1.5} />
+                  <span className="absolute -inset-1 bg-amber/20 blur-md -z-10 rounded-full" />
+                </>
+              )}
             </div>
-            <div>
-              <div className="text-display text-xl leading-none italic">Skynity</div>
+            <div className="min-w-0">
+              <div className="text-display text-xl leading-none italic truncate">{branding.name}</div>
               <div className="text-mono text-[10px] text-text-mute uppercase tracking-[0.2em] mt-0.5">
                 Operations
               </div>
@@ -99,39 +139,45 @@ export default function Layout() {
         </div>
 
         {/* nav */}
-        <nav className="relative flex-1 py-3 px-2 space-y-0.5">
+        <nav className="relative flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
           {nav.map((item) => {
             const showBadge = item.badge === 'pending' && pendingCount > 0;
             return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) =>
-                  clsx(
-                    'group flex items-center gap-3 px-3 py-2 text-sm transition-all rounded-sm relative',
-                    'hover:bg-surface2',
-                    isActive
-                      ? 'bg-surface2 text-amber'
-                      : 'text-text-dim hover:text-text'
-                  )
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    {isActive && (
-                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-5 bg-amber shadow-glow-amber" />
-                    )}
-                    <item.icon size={15} strokeWidth={1.5} />
-                    <span className="flex-1">{item.label}</span>
-                    {showBadge && (
-                      <span className="text-mono text-[10px] bg-amber text-black px-1.5 py-px rounded-sm">
-                        {pendingCount}
-                      </span>
-                    )}
-                  </>
+              <div key={item.to}>
+                {item.section && (
+                  <div className="pt-3 pb-1 px-3 text-mono text-[9px] text-text-mute uppercase tracking-[0.2em]">
+                    {item.section}
+                  </div>
                 )}
-              </NavLink>
+                <NavLink
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) =>
+                    clsx(
+                      'group flex items-center gap-3 px-3 py-2 text-sm transition-all rounded-sm relative',
+                      'hover:bg-surface2',
+                      isActive
+                        ? 'bg-surface2 text-amber'
+                        : 'text-text-dim hover:text-text'
+                    )
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      {isActive && (
+                        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-5 bg-amber shadow-glow-amber" />
+                      )}
+                      <item.icon size={15} strokeWidth={1.5} />
+                      <span className="flex-1">{item.label}</span>
+                      {showBadge && (
+                        <span className="text-mono text-[10px] bg-amber text-black px-1.5 py-px rounded-sm">
+                          {pendingCount}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </NavLink>
+              </div>
             );
           })}
         </nav>

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, X, Phone, Package as PackageIcon, Inbox } from 'lucide-react';
+import { Check, X, Phone, Package as PackageIcon, Inbox, FileText } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import {
-  apiOrders, apiApproveOrder, apiRejectOrder,
+  apiOrders, apiApproveOrder, apiRejectOrder, apiOpenOrderInvoice,
 } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { StatusPill, EmptyState, Skeleton } from '../components/primitives';
@@ -189,6 +189,19 @@ function OrderDetail({ order, onApprove, onReject, approving, rejecting, error }
           </InfoBlock>
         )}
       </div>
+
+      {order.status === 'approved' && (
+        <div className="px-6 pb-6">
+          <div className="flex items-center gap-3 pt-4 border-t border-border-dim">
+            <button
+              onClick={() => apiOpenOrderInvoice(order.id)}
+              className="btn btn-ghost"
+            >
+              <FileText size={15} /> Open invoice
+            </button>
+          </div>
+        </div>
+      )}
 
       {order.status === 'payment_submitted' && (
         <div className="px-6 pb-6">

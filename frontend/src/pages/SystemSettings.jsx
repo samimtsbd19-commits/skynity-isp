@@ -1,18 +1,20 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Save, Settings as Cog, Shield, Palette, Globe, Phone, Mail, Clock } from 'lucide-react';
+import { Save, Settings as Cog, Shield, Palette, Globe, Phone, Clock, CreditCard, FileText } from 'lucide-react';
 import { apiSettings, apiSettingsBulk } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { Skeleton } from '../components/primitives';
 
 const SECTIONS = [
-  { key: 'site',         title: 'Site / Branding', icon: Globe },
-  { key: 'provisioning', title: 'Provisioning',    icon: Cog },
-  { key: 'telegram',     title: 'Telegram',        icon: Phone },
-  { key: 'security',     title: 'Security',        icon: Shield },
-  { key: 'vpn',          title: 'VPN defaults',    icon: Shield },
-  { key: 'updates',      title: 'Updates',         icon: Clock },
-  { key: 'branding',     title: 'Appearance',      icon: Palette },
+  { key: 'site',         title: 'Site',             icon: Globe },
+  { key: 'branding',     title: 'Branding / Logo',  icon: Palette },
+  { key: 'payment',      title: 'Payment methods',  icon: CreditCard },
+  { key: 'invoice',      title: 'Invoicing',        icon: FileText },
+  { key: 'provisioning', title: 'Provisioning',     icon: Cog },
+  { key: 'telegram',     title: 'Telegram',         icon: Phone },
+  { key: 'security',     title: 'Security',         icon: Shield },
+  { key: 'vpn',          title: 'VPN defaults',     icon: Shield },
+  { key: 'updates',      title: 'Updates',          icon: Clock },
 ];
 
 export default function SystemSettings() {

@@ -129,8 +129,10 @@ function Landing() {
         </div>
       )}
 
-      <div style={{ marginTop: 24, textAlign: 'center' }}>
-        <Link to="/portal/status" className="btn btn-ghost">Check order status →</Link>
+      <div style={{ marginTop: 32, display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))' }}>
+        <Link to="/portal/redeem" className="btn">🎟 Redeem voucher</Link>
+        <Link to="/portal/login"  className="btn btn-ghost">↻ Returning customer login</Link>
+        <Link to="/portal/status" className="btn btn-ghost">🔎 Check order status</Link>
       </div>
     </Layout>
   );
@@ -461,6 +463,252 @@ function StatusLookup() {
 }
 
 // ===================================================================
+// Page: Voucher redeem — /portal/redeem
+// ===================================================================
+function Redeem() {
+  const [code, setCode] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [preview, setPreview] = useState(null);
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const info = useBranding();
+
+  // Lookup package info as soon as the user types a full-looking code.
+  useEffect(() => {
+    const trimmed = code.trim().toUpperCase();
+    if (trimmed.length < 10) { setPreview(null); return; }
+    let alive = true;
+    api.get(`/vouchers/${encodeURIComponent(trimmed)}/info`)
+      .then((r) => { if (alive) setPreview(r.data); })
+      .catch(() => { if (alive) setPreview(null); });
+    return () => { alive = false; };
+  }, [code]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErr(''); setBusy(true);
+    try {
+      const { data } = await api.post('/vouchers/redeem', {
+        code: code.trim(),
+        full_name: fullName.trim() || undefined,
+        phone: phone.trim() || undefined,
+      });
+      setResult(data);
+    } catch (ex) {
+      setErr(ex?.response?.data?.error || ex.message);
+    } finally { setBusy(false); }
+  };
+
+  if (result) {
+    const s = result.subscription;
+    return (
+      <Layout branding={info?.branding}>
+        <div className="card" style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 48 }}>✓</div>
+          <div style={{ fontSize: 20, fontWeight: 700, marginTop: 8 }}>Voucher activated</div>
+          <div className="muted" style={{ marginTop: 6 }}>Use these credentials to log in to the WiFi.</div>
+
+          <div style={{ marginTop: 16, padding: 16, background: '#0e0e11', border: '1px solid #2a2a30', borderRadius: 8, textAlign: 'left', display: 'inline-block', minWidth: 280 }}>
+            <div className="muted">Package</div>
+            <div style={{ fontWeight: 700 }}>{result.package.name}</div>
+            <div className="muted" style={{ marginTop: 10 }}>Username</div>
+            <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{s.login_username}</div>
+            <div className="muted" style={{ marginTop: 10 }}>Password</div>
+            <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{s.login_password}</div>
+            <div className="muted" style={{ marginTop: 10 }}>Expires</div>
+            <div>{new Date(s.expires_at).toLocaleString()}</div>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <button onClick={() => window.location.reload()} className="btn">Go back to WiFi login</button>
+          </div>
+          {s.mt_synced === 0 && (
+            <div className="muted" style={{ marginTop: 10 }}>
+              Account created — router sync is pending, it should work within a minute.
+            </div>
+          )}
+        </div>
+      </Layout>
+    );
+  }
+
+  const color = info?.branding?.primary_color || '#f59e0b';
+  const sym = info?.currency_symbol || '৳';
+
+  return (
+    <Layout branding={info?.branding}>
+      <div className="card">
+        <div className="kicker" style={{ marginBottom: 4 }}>Prepaid</div>
+        <h2 style={{ margin: '0 0 12px' }}>Redeem <em style={{ color }}>voucher code</em></h2>
+
+        <form onSubmit={submit}>
+          <div style={{ marginBottom: 12 }}>
+            <label className="label">Voucher code</label>
+            <input
+              required
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              placeholder="XXXX-XXXX-XXXX"
+              style={{ fontFamily: 'ui-monospace, Menlo, monospace', letterSpacing: '2px', fontSize: 18 }}
+              autoFocus
+            />
+            <div className="muted" style={{ marginTop: 4 }}>From your printed slip or counter receipt.</div>
+          </div>
+
+          {preview && !preview.is_redeemed && (
+            <div style={{ marginBottom: 12, padding: 12, background: '#0e0e11', border: `1px solid ${color}55`, borderRadius: 8 }}>
+              <div className="kicker" style={{ color }}>This code gives you</div>
+              <div style={{ fontWeight: 700, fontSize: 16, marginTop: 4 }}>{preview.package.name}</div>
+              <div className="muted" style={{ marginTop: 2 }}>
+                {preview.package.rate_down_mbps} Mbps · {preview.package.duration_days} days · worth {sym}{Number(preview.package.price).toFixed(0)}
+              </div>
+            </div>
+          )}
+          {preview && preview.is_redeemed && (
+            <div className="err" style={{ marginBottom: 12 }}>This code has already been used.</div>
+          )}
+
+          <div style={{ marginBottom: 12 }}>
+            <label className="label">Your name (optional)</label>
+            <input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="e.g. Rahim Uddin" />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label className="label">Your phone (optional)</label>
+            <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01XXXXXXXXX" />
+          </div>
+
+          {err && <div className="err">{err}</div>}
+          <button type="submit" className="btn" disabled={busy || !code} style={{ marginTop: 8 }}>
+            {busy ? 'Redeeming…' : 'Redeem & get credentials →'}
+          </button>
+        </form>
+
+        <div style={{ marginTop: 16 }}>
+          <Link to="/portal" className="btn btn-ghost">← Back to packages</Link>
+        </div>
+      </div>
+    </Layout>
+  );
+}
+
+// ===================================================================
+// Page: Returning-customer login — /portal/login
+// ===================================================================
+function CustomerLogin() {
+  const [phone, setPhone] = useState('');
+  const [orderCode, setOrderCode] = useState('');
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const info = useBranding();
+  const color = info?.branding?.primary_color || '#f59e0b';
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErr(''); setBusy(true);
+    try {
+      const { data } = await api.post('/customer/login', {
+        phone: phone.trim(),
+        order_code: orderCode.trim(),
+      });
+      setData(data);
+    } catch (ex) {
+      setErr(ex?.response?.data?.error || ex.message);
+    } finally { setBusy(false); }
+  };
+
+  if (data) {
+    return (
+      <Layout branding={info?.branding}>
+        <div className="card">
+          <div className="kicker">Welcome back</div>
+          <h2 style={{ margin: '4px 0 0' }}>
+            {data.customer?.full_name || 'Customer'}
+            <span className="muted" style={{ marginLeft: 8, fontSize: 14 }}>{data.customer?.customer_code}</span>
+          </h2>
+
+          <h3 style={{ marginTop: 20 }}>Your subscriptions</h3>
+          {(data.subscriptions || []).length === 0 ? (
+            <div className="muted">No subscriptions yet.</div>
+          ) : (
+            <div style={{ display: 'grid', gap: 12 }}>
+              {data.subscriptions.map((s) => {
+                const active = s.status === 'active' && new Date(s.expires_at) > new Date();
+                return (
+                  <div key={s.id} style={{ padding: 12, background: '#0e0e11', border: `1px solid ${active ? color : '#2a2a30'}`, borderRadius: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{s.package_name}</div>
+                        <div className="muted">{s.rate_down_mbps} Mbps · {s.duration_days} days</div>
+                      </div>
+                      <span className="tag" style={{ color: active ? color : '#78787e' }}>{active ? 'active' : s.status}</span>
+                    </div>
+                    <div style={{ marginTop: 10, fontSize: 13 }}>
+                      <div className="muted">Username / Password</div>
+                      <div style={{ fontFamily: 'ui-monospace, Menlo, monospace' }}>
+                        <b>{s.login_username}</b> / <b>{s.login_password}</b>
+                      </div>
+                      <div className="muted" style={{ marginTop: 8 }}>Expires</div>
+                      <div>{new Date(s.expires_at).toLocaleString()}</div>
+                    </div>
+                    <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+                      <Link to="/portal" className="btn btn-ghost">↻ Renew / add another package</Link>
+                      <a
+                        className="btn btn-ghost"
+                        target="_blank" rel="noopener noreferrer"
+                        href={`/api/portal/orders/${encodeURIComponent(data.order.order_code)}/invoice?phone=${encodeURIComponent(phone.trim())}`}
+                      >📄 Invoice</a>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+            <button onClick={() => { setData(null); setOrderCode(''); }} className="btn btn-ghost">Log out</button>
+            <Link to="/portal" className="btn btn-ghost">← Packages</Link>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
+  return (
+    <Layout branding={info?.branding}>
+      <div className="card">
+        <div className="kicker">Returning customer</div>
+        <h2 style={{ margin: '4px 0 12px' }}>Log in with <em style={{ color }}>phone + order code</em></h2>
+        <p className="muted" style={{ marginTop: -4, marginBottom: 16 }}>
+          Use the phone you gave when you bought your WiFi and the ORD code we showed you.
+        </p>
+
+        <form onSubmit={submit}>
+          <div style={{ marginBottom: 12 }}>
+            <label className="label">Mobile number</label>
+            <input required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01XXXXXXXXX" inputMode="tel" />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label className="label">Order code</label>
+            <input required value={orderCode} onChange={(e) => setOrderCode(e.target.value.toUpperCase())} placeholder="ORD-YYYYMMDD-XXXXXX" />
+          </div>
+          {err && <div className="err">{err}</div>}
+          <button type="submit" className="btn" disabled={busy} style={{ marginTop: 8 }}>
+            {busy ? '…' : 'Log in'}
+          </button>
+        </form>
+
+        <div style={{ marginTop: 16 }}>
+          <Link to="/portal" className="btn btn-ghost">← Back to packages</Link>
+        </div>
+      </div>
+    </Layout>
+  );
+}
+
+// ===================================================================
 // Root component — owns its own BrowserRouter so it can be mounted
 // completely outside the admin app.
 // ===================================================================
@@ -469,6 +717,8 @@ export default function PublicPortal() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/order" element={<OrderFlow />} />
+      <Route path="/redeem" element={<Redeem />} />
+      <Route path="/login" element={<CustomerLogin />} />
       <Route path="/status" element={<StatusLookup />} />
       <Route path="/status/:code" element={<StatusLookup />} />
       <Route path="*" element={<Navigate to="/portal" replace />} />

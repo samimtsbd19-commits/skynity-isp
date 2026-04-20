@@ -374,6 +374,15 @@ export async function generatePortalHtml(opts = {}) {
       ${pkgCards || '<div style="grid-column:1/-1;color:#78787e;text-align:center;padding:40px">No packages available yet. Please contact admin.</div>'}
     </div>
 
+    <div style="display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-top:24px">
+      <a class="pkg" href="${portalUrl}/redeem" target="_blank" rel="noopener" style="text-align:center">
+        <div class="pkg-buy" style="font-size:14px;margin:0">🎟 Have a voucher? Redeem</div>
+      </a>
+      <a class="pkg" href="${portalUrl}/login" target="_blank" rel="noopener" style="text-align:center">
+        <div class="pkg-buy" style="font-size:14px;margin:0">↻ Returning customer login</div>
+      </a>
+    </div>
+
     <footer>
       ${supportPhone ? `Support: <a href="tel:${escapeHtml(supportPhone)}">${escapeHtml(supportPhone)}</a> · ` : ''}
       Powered by <a href="https://${escapeHtml(vpsHost)}" target="_blank" rel="noopener">${escapeHtml(brand)}</a>

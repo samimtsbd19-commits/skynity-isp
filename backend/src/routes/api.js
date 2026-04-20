@@ -12,6 +12,8 @@ import settingsRouter from './settings.js';
 import adminsRouter from './admins.js';
 import routersRouter from './routers.js';
 import portalRouter from './portal.js';
+import vouchersRouter from './vouchers.js';
+import { renderInvoiceForOrder } from '../services/invoice.js';
 
 const router = Router();
 
@@ -23,9 +25,20 @@ router.use('/updates',  updatesRouter);
 router.use('/settings', settingsRouter);
 router.use('/admins',   adminsRouter);
 router.use('/routers-admin', routersRouter);
+router.use('/vouchers',  vouchersRouter);
 
 // PUBLIC (no auth) — self-service customer portal
 router.use('/portal',   portalRouter);
+
+// ------------------------------------------------------------
+// Invoice (admin side — for any order)
+// ------------------------------------------------------------
+router.get('/orders/:codeOrId/invoice', requireAdmin, async (req, res) => {
+  const html = await renderInvoiceForOrder(req.params.codeOrId);
+  if (!html) return res.status(404).send('order not found');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(html);
+});
 
 /** `?routerId=1` selects DB router; omit or invalid → env default (primary). */
 function routerIdFromQuery(q) {
