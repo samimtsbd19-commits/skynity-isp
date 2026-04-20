@@ -553,6 +553,31 @@ export function startBot() {
  * Safe to call even when the bot is disabled — the stubbed
  * `bot.sendMessage` in that case is a no-op.
  */
+/**
+ * Send a message to a specific Telegram chat id (customer).
+ * Returns { ok, error }.
+ */
+export async function sendTelegramTo(chatId, text, opts = {}) {
+  if (!TELEGRAM_BOT_TOKEN) return { ok: false, error: 'telegram bot not configured' };
+  if (!chatId) return { ok: false, error: 'no telegram_id for this customer' };
+  try {
+    await bot.sendMessage(chatId, text, {
+      parse_mode: 'Markdown',
+      disable_web_page_preview: true,
+      ...opts,
+    });
+    return { ok: true };
+  } catch (err) {
+    logger.warn({ err: err.message, chatId }, 'sendTelegramTo failed');
+    return { ok: false, error: err.message };
+  }
+}
+
+/** Expose the boolean for settings/status endpoints. */
+export function telegramConfigured() {
+  return !!TELEGRAM_BOT_TOKEN;
+}
+
 export async function notifyAdmins(text, opts = {}) {
   if (!TELEGRAM_ADMIN_IDS || !TELEGRAM_ADMIN_IDS.length) return;
   const payload = { parse_mode: 'Markdown', disable_web_page_preview: true, ...opts };

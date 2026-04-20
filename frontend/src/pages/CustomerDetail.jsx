@@ -1,8 +1,13 @@
+import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Phone, Mail, MapPin, MessageCircle, Calendar, Key, Copy } from 'lucide-react';
+import {
+  ArrowLeft, Phone, Mail, MessageCircle, Calendar, Key, Copy, Send,
+} from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
-import { apiCustomer } from '../api/client';
+import {
+  apiCustomer, apiNotifyChannels, apiNotifySendCredentials,
+} from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { StatusPill, Skeleton } from '../components/primitives';
 
@@ -147,7 +152,73 @@ function SubscriptionCard({ sub }) {
         <div className={`text-xs mt-0.5 font-mono ${expired ? 'text-red' : daysLeft < 3 ? 'text-amber' : 'text-text-mute'}`}>
           {expired ? 'Expired' : `${daysLeft} days left`}
         </div>
+        <div className="mt-3">
+          <SendCredentialsButton subscriptionId={sub.id} />
+        </div>
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// "Send credentials" dropdown
+//   - Shows enabled channels only
+//   - Builds canonical username/password message server-side
+//   - Also has a free-form "Send a message…" option
+// ============================================================
+function SendCredentialsButton({ subscriptionId }) {
+  const { data: channels = [] } = useQuery({
+    queryKey: ['notify', 'channels'],
+    queryFn: apiNotifyChannels,
+  });
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(null);   // channel currently in flight
+  const [result, setResult] = useState(null);
+
+  const ready = channels.filter((c) => c.enabled && c.configured);
+
+  const send = async (channel) => {
+    setBusy(channel); setResult(null);
+    try {
+      await apiNotifySendCredentials({ subscription_id: subscriptionId, channel });
+      setResult({ ok: true, via: channel });
+    } catch (e) {
+      setResult({ ok: false, detail: e?.response?.data?.error || e.message });
+    } finally { setBusy(null); }
+  };
+
+  if (!ready.length) {
+    return (
+      <div className="text-[10px] text-text-mute italic">
+        Enable a channel in Settings to send by SMS/Telegram.
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative inline-block">
+      <button onClick={() => setOpen((o) => !o)} className="btn btn-ghost text-xs">
+        <Send size={12} /> Send credentials
+      </button>
+      {open && (
+        <div className="absolute right-0 z-10 mt-1 panel p-2 min-w-[180px]">
+          {ready.map((c) => (
+            <button
+              key={c.channel}
+              onClick={() => send(c.channel)}
+              disabled={busy === c.channel}
+              className="w-full text-left px-3 py-2 text-xs hover:bg-surface2 rounded-sm font-mono uppercase tracking-wider"
+            >
+              {busy === c.channel ? 'sending…' : `via ${c.channel}`}
+            </button>
+          ))}
+        </div>
+      )}
+      {result && (
+        <div className={`text-[10px] mt-1 font-mono ${result.ok ? 'text-green' : 'text-red'}`}>
+          {result.ok ? `✓ sent via ${result.via}` : `✗ ${result.detail}`}
+        </div>
+      )}
     </div>
   );
 }

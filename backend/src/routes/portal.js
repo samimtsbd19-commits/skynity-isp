@@ -42,6 +42,7 @@ import { notifyAdmins } from '../telegram/bot.js';
 import vouchers from '../services/vouchers.js';
 import { renderInvoiceForOrder } from '../services/invoice.js';
 import { normaliseMac } from '../utils/mac.js';
+import otp from '../services/otp.js';
 
 const router = Router();
 
@@ -94,6 +95,8 @@ function rateLimit({ windowMs, max }) {
 // gentler for GET (polling), stricter for POST
 const getLimiter  = rateLimit({ windowMs: 60_000, max: 120 });
 const postLimiter = rateLimit({ windowMs: 60_000, max: 8 });
+// OTP is cheap on our side but expensive on the SMS side — lock it tight.
+const otpLimiter  = rateLimit({ windowMs: 60_000, max: 3 });
 
 // ------------------------------------------------------------
 // helpers
@@ -576,6 +579,60 @@ router.get('/orders/:code/invoice', getLimiter, async (req, res) => {
   } catch (err) {
     logger.error({ err }, 'portal invoice failed');
     res.status(500).send('error');
+  }
+});
+
+// ============================================================
+// 10) POST /portal/otp/request   { phone }
+//     Issue an OTP for the given phone and deliver it through
+//     whichever notification channel the admin has configured
+//     (Telegram if the customer's telegram_id is on file, else
+//     SMS or WhatsApp). On success returns { channel, ttl_seconds }.
+// ============================================================
+router.post('/otp/request', otpLimiter, async (req, res) => {
+  try {
+    const phone = normalisePhone(req.body?.phone);
+    if (!phone) return res.status(400).json({ error: 'phone required' });
+    const out = await otp.issueOtp({ phone, purpose: 'login', ip: clientIp(req) });
+    if (!out.ok) return res.status(400).json(out);
+    res.json(out);
+  } catch (err) {
+    logger.error({ err }, 'otp request failed');
+    res.status(500).json({ error: err.message || 'internal error' });
+  }
+});
+
+// ============================================================
+// 11) POST /portal/otp/verify    { phone, code }
+//     Validates the OTP and returns the customer's subscriptions
+//     — exactly the same payload shape as /customer/login, so
+//     the frontend can treat either auth path the same way.
+// ============================================================
+router.post('/otp/verify', postLimiter, async (req, res) => {
+  try {
+    const phone = normalisePhone(req.body?.phone);
+    const code = String(req.body?.code || '').trim();
+    if (!phone || !code) return res.status(400).json({ error: 'phone and code required' });
+    const out = await otp.verifyOtp({ phone, code, purpose: 'login' });
+    if (!out.ok) return res.status(400).json(out);
+
+    // Shape the response the same way as /customer/login so the
+    // portal can reuse its "Welcome back" component unchanged.
+    res.json({
+      ok: true,
+      customer: out.customer,
+      subscriptions: out.subscriptions || [],
+      // Pull the most recent order so the invoice button has a code to hit.
+      order: out.customer
+        ? await db.queryOne(
+            'SELECT order_code, status, amount FROM orders WHERE customer_id = ? ORDER BY id DESC LIMIT 1',
+            [out.customer.id]
+          )
+        : null,
+    });
+  } catch (err) {
+    logger.error({ err }, 'otp verify failed');
+    res.status(500).json({ error: err.message || 'internal error' });
   }
 });
 

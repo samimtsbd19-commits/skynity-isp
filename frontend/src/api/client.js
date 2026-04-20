@@ -228,6 +228,20 @@ export async function apiOpenVoucherBatchPrint(batchId) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+// ---------- Notifications ----------
+export const apiNotifyChannels = () =>
+  api.get('/notify/channels').then((r) => r.data.channels);
+export const apiNotifyLog = (limit = 50, offset = 0) =>
+  api.get('/notify/log', { params: { limit, offset } }).then((r) => r.data.log);
+export const apiNotifyTest = (data) =>
+  api.post('/notify/test', data).then((r) => r.data);
+export const apiNotifySendCredentials = (data) =>
+  api.post('/notify/send-credentials', data).then((r) => r.data);
+export const apiNotifySendOrderCode = (data) =>
+  api.post('/notify/send-order-code', data).then((r) => r.data);
+export const apiNotifySend = (data) =>
+  api.post('/notify/send', data).then((r) => r.data);
+
 // ---------- Router CRUD ----------
 export const apiRouterCreate = (data) => api.post('/routers-admin', data).then((r) => r.data);
 export const apiRouterUpdate = (id, patch) => api.patch(`/routers-admin/${id}`, patch).then((r) => r.data);

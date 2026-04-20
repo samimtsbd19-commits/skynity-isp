@@ -597,13 +597,24 @@ function Redeem() {
 // Page: Returning-customer login — /portal/login
 // ===================================================================
 function CustomerLogin() {
+  const [mode, setMode] = useState('otp'); // 'otp' | 'order'
   const [phone, setPhone] = useState('');
   const [orderCode, setOrderCode] = useState('');
+  const [code, setCode] = useState('');
+  const [otpSent, setOtpSent] = useState(null);  // { channel, ttl_seconds }
+  const [cooldown, setCooldown] = useState(0);
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const info = useBranding();
   const color = info?.branding?.primary_color || '#f59e0b';
+
+  // Count down the re-send cooldown.
+  useEffect(() => {
+    if (!cooldown) return;
+    const t = setInterval(() => setCooldown((c) => Math.max(0, c - 1)), 1000);
+    return () => clearInterval(t);
+  }, [cooldown]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -612,6 +623,32 @@ function CustomerLogin() {
       const { data } = await api.post('/customer/login', {
         phone: phone.trim(),
         order_code: orderCode.trim(),
+      });
+      setData(data);
+    } catch (ex) {
+      setErr(ex?.response?.data?.error || ex.message);
+    } finally { setBusy(false); }
+  };
+
+  const requestOtp = async (e) => {
+    e?.preventDefault();
+    setErr(''); setBusy(true);
+    try {
+      const { data } = await api.post('/otp/request', { phone: phone.trim() });
+      setOtpSent(data);
+      setCooldown(30);
+    } catch (ex) {
+      setErr(ex?.response?.data?.error || ex.message);
+    } finally { setBusy(false); }
+  };
+
+  const verifyOtp = async (e) => {
+    e.preventDefault();
+    setErr(''); setBusy(true);
+    try {
+      const { data } = await api.post('/otp/verify', {
+        phone: phone.trim(),
+        code: code.trim(),
       });
       setData(data);
     } catch (ex) {
@@ -660,16 +697,20 @@ function CustomerLogin() {
                       </div>
                     )}
                     <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <Link
-                        to={`/portal/renew?sub=${s.id}&phone=${encodeURIComponent(phone.trim())}&code=${encodeURIComponent(data.order.order_code)}`}
-                        className="btn"
-                        style={{ background: color }}
-                      >↻ Renew</Link>
-                      <a
-                        className="btn btn-ghost"
-                        target="_blank" rel="noopener noreferrer"
-                        href={`/api/portal/orders/${encodeURIComponent(data.order.order_code)}/invoice?phone=${encodeURIComponent(phone.trim())}`}
-                      >📄 Invoice</a>
+                      {data.order?.order_code && (
+                        <Link
+                          to={`/portal/renew?sub=${s.id}&phone=${encodeURIComponent(phone.trim())}&code=${encodeURIComponent(data.order.order_code)}`}
+                          className="btn"
+                          style={{ background: color }}
+                        >↻ Renew</Link>
+                      )}
+                      {data.order?.order_code && (
+                        <a
+                          className="btn btn-ghost"
+                          target="_blank" rel="noopener noreferrer"
+                          href={`/api/portal/orders/${encodeURIComponent(data.order.order_code)}/invoice?phone=${encodeURIComponent(phone.trim())}`}
+                        >📄 Invoice</a>
+                      )}
                     </div>
                   </div>
                 );
@@ -690,25 +731,92 @@ function CustomerLogin() {
     <Layout branding={info?.branding}>
       <div className="card">
         <div className="kicker">Returning customer</div>
-        <h2 style={{ margin: '4px 0 12px' }}>Log in with <em style={{ color }}>phone + order code</em></h2>
-        <p className="muted" style={{ marginTop: -4, marginBottom: 16 }}>
-          Use the phone you gave when you bought your WiFi and the ORD code we showed you.
-        </p>
+        <h2 style={{ margin: '4px 0 12px' }}>Log in</h2>
 
-        <form onSubmit={submit}>
-          <div style={{ marginBottom: 12 }}>
-            <label className="label">Mobile number</label>
-            <input required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01XXXXXXXXX" inputMode="tel" />
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <label className="label">Order code</label>
-            <input required value={orderCode} onChange={(e) => setOrderCode(e.target.value.toUpperCase())} placeholder="ORD-YYYYMMDD-XXXXXX" />
-          </div>
-          {err && <div className="err">{err}</div>}
-          <button type="submit" className="btn" disabled={busy} style={{ marginTop: 8 }}>
-            {busy ? '…' : 'Log in'}
-          </button>
-        </form>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          <button
+            type="button"
+            onClick={() => { setMode('otp'); setErr(''); }}
+            className="btn btn-ghost"
+            style={mode === 'otp' ? { borderColor: color, color } : {}}
+          >📲 OTP (phone)</button>
+          <button
+            type="button"
+            onClick={() => { setMode('order'); setErr(''); setOtpSent(null); }}
+            className="btn btn-ghost"
+            style={mode === 'order' ? { borderColor: color, color } : {}}
+          >🎫 Order code</button>
+        </div>
+
+        {mode === 'otp' ? (
+          !otpSent ? (
+            <form onSubmit={requestOtp}>
+              <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>
+                We'll send a one-time code to your phone (Telegram if you registered there, otherwise SMS).
+              </p>
+              <div style={{ marginBottom: 12 }}>
+                <label className="label">Mobile number</label>
+                <input required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01XXXXXXXXX" inputMode="tel" autoFocus />
+              </div>
+              {err && <div className="err">{err}</div>}
+              <button type="submit" className="btn" disabled={busy || !phone} style={{ marginTop: 8 }}>
+                {busy ? 'Sending…' : 'Send OTP →'}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={verifyOtp}>
+              <div className="muted" style={{ marginBottom: 12 }}>
+                OTP sent via <b>{otpSent.channel}</b> to <code>{phone}</code>.
+                Valid for {Math.round((otpSent.ttl_seconds || 300) / 60)} minutes.
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <label className="label">Enter OTP</label>
+                <input
+                  required inputMode="numeric" pattern="\d{4,8}"
+                  value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                  placeholder="123456" autoFocus
+                  style={{ fontFamily: 'ui-monospace, Menlo, monospace', letterSpacing: '4px', fontSize: 20, textAlign: 'center' }}
+                />
+              </div>
+              {err && <div className="err">{err}</div>}
+              <button type="submit" className="btn" disabled={busy || !code} style={{ marginTop: 8 }}>
+                {busy ? 'Verifying…' : 'Verify & log in'}
+              </button>
+              <button
+                type="button"
+                onClick={requestOtp}
+                disabled={cooldown > 0 || busy}
+                className="btn btn-ghost"
+                style={{ marginLeft: 8 }}
+              >
+                {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend OTP'}
+              </button>
+              <div style={{ marginTop: 8 }}>
+                <button type="button" onClick={() => { setOtpSent(null); setCode(''); setErr(''); }} className="btn btn-ghost">
+                  ← Use different number
+                </button>
+              </div>
+            </form>
+          )
+        ) : (
+          <form onSubmit={submit}>
+            <p className="muted" style={{ marginTop: 0, marginBottom: 12 }}>
+              Use the phone you gave when you bought your WiFi and the ORD code we showed you.
+            </p>
+            <div style={{ marginBottom: 12 }}>
+              <label className="label">Mobile number</label>
+              <input required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01XXXXXXXXX" inputMode="tel" />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label className="label">Order code</label>
+              <input required value={orderCode} onChange={(e) => setOrderCode(e.target.value.toUpperCase())} placeholder="ORD-YYYYMMDD-XXXXXX" />
+            </div>
+            {err && <div className="err">{err}</div>}
+            <button type="submit" className="btn" disabled={busy} style={{ marginTop: 8 }}>
+              {busy ? '…' : 'Log in'}
+            </button>
+          </form>
+        )}
 
         <div style={{ marginTop: 16 }}>
           <Link to="/portal" className="btn btn-ghost">← Back to packages</Link>

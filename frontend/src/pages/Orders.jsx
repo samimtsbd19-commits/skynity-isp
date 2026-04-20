@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, X, Phone, Package as PackageIcon, Inbox, FileText } from 'lucide-react';
+import {
+  Check, X, Phone, Package as PackageIcon, Inbox, FileText, Send,
+} from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import {
   apiOrders, apiApproveOrder, apiRejectOrder, apiOpenOrderInvoice,
+  apiNotifyChannels, apiNotifySendOrderCode,
 } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { StatusPill, EmptyState, Skeleton } from '../components/primitives';
@@ -204,13 +207,14 @@ function OrderDetail({ order, onApprove, onReject, approving, rejecting, error }
 
       {order.status === 'approved' && (
         <div className="px-6 pb-6">
-          <div className="flex items-center gap-3 pt-4 border-t border-border-dim">
+          <div className="flex items-center gap-3 pt-4 border-t border-border-dim flex-wrap">
             <button
               onClick={() => apiOpenOrderInvoice(order.id)}
               className="btn btn-ghost"
             >
               <FileText size={15} /> Open invoice
             </button>
+            <SendOrderCodeButton orderId={order.id} />
           </div>
         </div>
       )}
@@ -265,6 +269,60 @@ function OrderDetail({ order, onApprove, onReject, approving, rejecting, error }
               {error.response?.data?.error || error.message}
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// Admin helper — "Send this order code to the customer" via
+// the configured notification channel (SMS / WhatsApp / Telegram).
+// ============================================================
+function SendOrderCodeButton({ orderId }) {
+  const { data: channels = [] } = useQuery({
+    queryKey: ['notify', 'channels'],
+    queryFn: apiNotifyChannels,
+  });
+  const ready = channels.filter((c) => c.enabled && c.configured);
+  const [open, setOpen]   = useState(false);
+  const [busy, setBusy]   = useState(null);
+  const [result, setResult] = useState(null);
+
+  if (!ready.length) return null;
+
+  const send = async (channel) => {
+    setBusy(channel); setResult(null);
+    try {
+      await apiNotifySendOrderCode({ order_id: orderId, channel });
+      setResult({ ok: true, via: channel });
+    } catch (e) {
+      setResult({ ok: false, detail: e?.response?.data?.error || e.message });
+    } finally { setBusy(null); }
+  };
+
+  return (
+    <div className="relative inline-block">
+      <button onClick={() => setOpen((o) => !o)} className="btn btn-ghost">
+        <Send size={14} /> Send order code
+      </button>
+      {open && (
+        <div className="absolute left-0 z-10 mt-1 panel p-2 min-w-[180px]">
+          {ready.map((c) => (
+            <button
+              key={c.channel}
+              onClick={() => send(c.channel)}
+              disabled={busy === c.channel}
+              className="w-full text-left px-3 py-2 text-xs hover:bg-surface2 rounded-sm font-mono uppercase tracking-wider"
+            >
+              {busy === c.channel ? 'sending…' : `via ${c.channel}`}
+            </button>
+          ))}
+        </div>
+      )}
+      {result && (
+        <div className={`ml-3 inline-block text-[11px] font-mono ${result.ok ? 'text-green' : 'text-red'}`}>
+          {result.ok ? `✓ sent via ${result.via}` : `✗ ${result.detail}`}
         </div>
       )}
     </div>

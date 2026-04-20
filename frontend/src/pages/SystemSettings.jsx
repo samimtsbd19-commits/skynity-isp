@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Save, Settings as Cog, Shield, Palette, Globe, Phone, Clock, CreditCard, FileText } from 'lucide-react';
-import { apiSettings, apiSettingsBulk } from '../api/client';
+import {
+  Save, Settings as Cog, Shield, Palette, Globe, Phone, Clock,
+  CreditCard, FileText, MessageSquare, Send, CheckCircle2, XCircle,
+} from 'lucide-react';
+import {
+  apiSettings, apiSettingsBulk,
+  apiNotifyChannels, apiNotifyTest,
+} from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { Skeleton } from '../components/primitives';
 
@@ -11,6 +17,7 @@ const SECTIONS = [
   { key: 'payment',      title: 'Payment methods',  icon: CreditCard },
   { key: 'invoice',      title: 'Invoicing',        icon: FileText },
   { key: 'provisioning', title: 'Provisioning',     icon: Cog },
+  { key: 'notify',       title: 'Notifications (OTP / SMS / WhatsApp / Telegram)', icon: MessageSquare },
   { key: 'telegram',     title: 'Telegram',         icon: Phone },
   { key: 'security',     title: 'Security',         icon: Shield },
   { key: 'vpn',          title: 'VPN defaults',     icon: Shield },
@@ -72,6 +79,9 @@ export default function SystemSettings() {
                   <Icon size={16} className="text-amber" strokeWidth={1.5} />
                   <h2 className="text-display text-xl italic">{sec.title}</h2>
                 </div>
+
+                {sec.key === 'notify' && <NotifyChannelStatus />}
+
                 <div className="grid md:grid-cols-2 gap-4">
                   {rows.map((s) => (
                     <SettingInput
@@ -87,6 +97,109 @@ export default function SystemSettings() {
           })
         )}
       </div>
+    </div>
+  );
+}
+
+function NotifyChannelStatus() {
+  const { data: channels = [], refetch, isFetching } = useQuery({
+    queryKey: ['notify', 'channels'],
+    queryFn: apiNotifyChannels,
+    refetchOnWindowFocus: false,
+  });
+  const [tc, setTc] = useState(null); // test config: { channel, target }
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const runTest = async () => {
+    if (!tc?.channel || !tc.target) return;
+    setTesting(true); setResult(null);
+    try {
+      const out = await apiNotifyTest({
+        channel: tc.channel,
+        target: tc.target.trim(),
+      });
+      setResult({ ok: true, detail: out });
+    } catch (e) {
+      setResult({ ok: false, detail: e?.response?.data?.error || e.message });
+    } finally { setTesting(false); }
+  };
+
+  return (
+    <div className="mb-6 border border-border-dim rounded-sm">
+      <div className="px-4 py-3 border-b border-border-dim flex items-center justify-between">
+        <div className="text-mono text-[10px] text-text-mute uppercase tracking-wider">
+          Channel status
+        </div>
+        <button
+          onClick={() => refetch()}
+          className="text-[11px] font-mono text-amber hover:text-amber-dim uppercase tracking-wider"
+          disabled={isFetching}
+        >{isFetching ? 'checking…' : 'refresh'}</button>
+      </div>
+      <ul className="divide-y divide-border-dim">
+        {channels.map((c) => {
+          const live = c.enabled && c.configured;
+          return (
+            <li key={c.channel} className="px-4 py-3 flex items-center gap-4">
+              <div className="w-24 text-sm font-semibold uppercase tracking-wider">
+                {c.channel}
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                {live ? (
+                  <span className="inline-flex items-center gap-1 text-green">
+                    <CheckCircle2 size={14} /> ready
+                  </span>
+                ) : c.enabled && !c.configured ? (
+                  <span className="inline-flex items-center gap-1 text-amber">
+                    <XCircle size={14} /> enabled but credentials missing
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-text-mute">
+                    <XCircle size={14} /> off
+                  </span>
+                )}
+                {c.provider && (
+                  <span className="tag tag-dim">{c.provider}</span>
+                )}
+              </div>
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  onClick={() => setTc({ channel: c.channel, target: '' })}
+                  className="btn btn-ghost text-xs"
+                >
+                  <Send size={13} /> test
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+
+      {tc && (
+        <div className="px-4 py-3 border-t border-border-dim bg-surface2/40">
+          <div className="text-mono text-[10px] text-text-mute uppercase tracking-wider mb-2">
+            Send a test via <span className="text-amber">{tc.channel}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              className="input flex-1"
+              placeholder={tc.channel === 'telegram' ? 'Telegram chat id' : 'Phone (01XXXXXXXXX)'}
+              value={tc.target}
+              onChange={(e) => setTc({ ...tc, target: e.target.value })}
+            />
+            <button onClick={runTest} disabled={testing || !tc.target} className="btn btn-primary">
+              {testing ? 'Sending…' : 'Send'}
+            </button>
+            <button onClick={() => { setTc(null); setResult(null); }} className="btn btn-ghost">Cancel</button>
+          </div>
+          {result && (
+            <div className={`mt-2 text-xs font-mono ${result.ok ? 'text-green' : 'text-red'}`}>
+              {result.ok ? '✓ sent' : '✗ ' + JSON.stringify(result.detail)}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

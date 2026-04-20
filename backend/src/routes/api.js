@@ -13,6 +13,7 @@ import adminsRouter from './admins.js';
 import routersRouter from './routers.js';
 import portalRouter from './portal.js';
 import vouchersRouter from './vouchers.js';
+import notifyRouter from './notify.js';
 import { renderInvoiceForOrder } from '../services/invoice.js';
 
 const router = Router();
@@ -26,6 +27,7 @@ router.use('/settings', settingsRouter);
 router.use('/admins',   adminsRouter);
 router.use('/routers-admin', routersRouter);
 router.use('/vouchers',  vouchersRouter);
+router.use('/notify',    notifyRouter);
 
 // PUBLIC (no auth) — self-service customer portal
 router.use('/portal',   portalRouter);
