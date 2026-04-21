@@ -293,6 +293,31 @@ function Landing() {
         </div>
       )}
 
+      {/* Build-your-own custom package — tappable banner that jumps to /build */}
+      <button
+        onClick={() => nav('/portal/build')}
+        style={{
+          width: '100%', marginBottom: 20, padding: 16,
+          background: `linear-gradient(135deg, ${color}22, ${color}05)`,
+          border: `1px solid ${color}66`, borderRadius: 12,
+          color: 'inherit', font: 'inherit', cursor: 'pointer',
+          textAlign: 'left', display: 'flex', alignItems: 'center', gap: 14,
+        }}
+      >
+        <div style={{
+          width: 40, height: 40, borderRadius: 10, background: color,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: '#0b0b0d', fontSize: 20, fontWeight: 700,
+        }}>⚡</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>Build your own package</div>
+          <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
+            Pick devices, speed, and duration — see price instantly.
+          </div>
+        </div>
+        <div style={{ color, fontSize: 20 }}>→</div>
+      </button>
+
       <div className="kicker" style={{ textAlign: 'center', marginBottom: 8 }}>Available packages</div>
       <h2 style={{ margin: '0 0 20px', textAlign: 'center', fontSize: 22 }}>Choose your <em style={{ color }}>plan</em></h2>
 
@@ -2150,6 +2175,7 @@ export default function PublicPortal() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
+      <Route path="/build" element={<CustomBuilder />} />
       <Route path="/order" element={<OrderFlow />} />
       <Route path="/redeem" element={<Redeem />} />
       <Route path="/renew" element={<Renew />} />
@@ -2161,5 +2187,181 @@ export default function PublicPortal() {
       <Route path="/status/:code" element={<StatusLookup />} />
       <Route path="*" element={<Navigate to="/portal" replace />} />
     </Routes>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// Custom Package Builder — user picks devices × speed × duration,
+// sees live price, and submits as a custom order.
+// ═════════════════════════════════════════════════════════════
+function CustomBuilder() {
+  const info = useBranding();
+  const nav = useNavigate();
+  const [devices, setDevices]   = useState(1);
+  const [speedMbps, setSpeed]   = useState(5);
+  const [days, setDays]         = useState(30);
+  const [phone, setPhone]       = useState('');
+  const [fullName, setFullName] = useState('');
+  const [address, setAddress]   = useState('');
+  const [submitting, setSubmit] = useState(false);
+  const [err, setErr]           = useState('');
+  const [created, setCreated]   = useState(null);
+
+  const sym = info?.currency_symbol || '৳';
+  const color = info?.branding?.primary_color || '#f59e0b';
+
+  const DEVICES_OPTS = [1, 2, 3, 5];
+  const SPEEDS_OPTS  = [3, 5, 10, 15, 20];
+  const DAYS_OPTS    = [1, 5, 10, 15, 30];
+
+  // Price formula — transparent and easy to adjust from admin later.
+  // Base: 3 BDT per Mbps per device per day. Volume discount after 10 days.
+  const pricePerMbpsPerDay = 3;
+  const volumeDiscount = days >= 30 ? 0.75 : days >= 15 ? 0.85 : days >= 10 ? 0.9 : 1;
+  const price = Math.round(devices * speedMbps * days * pricePerMbpsPerDay * volumeDiscount);
+
+  async function submit() {
+    setErr('');
+    if (!fullName || !phone) { setErr('Name and phone required'); return; }
+    setSubmit(true);
+    try {
+      const res = await api.post('/orders/custom', {
+        devices,
+        speed_mbps: speedMbps,
+        duration_days: days,
+        price,
+        full_name: fullName.trim(),
+        phone: phone.trim(),
+        address: address.trim(),
+      });
+      setCreated(res.data);
+    } catch (e) {
+      setErr(e?.response?.data?.error || e.message || 'Failed');
+    } finally {
+      setSubmit(false);
+    }
+  }
+
+  if (!info) return <Layout><div className="muted" style={{ textAlign: 'center' }}>Loading…</div></Layout>;
+
+  if (created) {
+    return (
+      <Layout branding={info.branding} support={info.support}>
+        <div className="card" style={{ textAlign: 'center', borderColor: color }}>
+          <div style={{ fontSize: 24, marginBottom: 10 }}>✅ Order placed</div>
+          <div style={{ fontSize: 14, color: '#cbd5e1', marginBottom: 16 }}>
+            Your order code: <strong style={{ color }}>{created.order_code}</strong>
+          </div>
+          <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 16 }}>
+            Please complete payment. You'll get a Telegram/SMS confirmation once approved.
+          </div>
+          <Link to="/portal" className="btn btn-ghost">← Back to home</Link>
+        </div>
+      </Layout>
+    );
+  }
+
+  return (
+    <Layout branding={info.branding} support={info.support}>
+      <div style={{ marginBottom: 18 }}>
+        <Link to="/portal" style={{ fontSize: 13 }}>← Back</Link>
+      </div>
+
+      <div className="kicker" style={{ textAlign: 'center', marginBottom: 8 }}>Custom plan</div>
+      <h2 style={{ margin: '0 0 6px', textAlign: 'center', fontSize: 24 }}>
+        Build your <em style={{ color }}>own</em> package
+      </h2>
+      <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: 13, marginBottom: 28 }}>
+        Choose how many devices, how fast, and for how long. Price updates live.
+      </p>
+
+      {/* Devices */}
+      <OptionGroup label="How many devices?" value={devices} options={DEVICES_OPTS}
+        format={(v) => `${v} device${v > 1 ? 's' : ''}`} onChange={setDevices} color={color} />
+
+      {/* Speed */}
+      <OptionGroup label="Speed" value={speedMbps} options={SPEEDS_OPTS}
+        format={(v) => `${v} Mbps`} onChange={setSpeed} color={color} />
+
+      {/* Duration */}
+      <OptionGroup label="Duration" value={days} options={DAYS_OPTS}
+        format={(v) => v === 1 ? '1 day' : `${v} days`} onChange={setDays} color={color} />
+
+      {/* Price summary */}
+      <div className="card" style={{
+        margin: '24px 0', background: `${color}11`, border: `1px solid ${color}55`,
+        textAlign: 'center',
+      }}>
+        <div style={{ fontSize: 11, color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: 6 }}>
+          Your price
+        </div>
+        <div style={{ fontSize: 36, fontWeight: 700, color, lineHeight: 1 }}>
+          {sym}{price}
+        </div>
+        <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 8 }}>
+          {devices} device{devices > 1 ? 's' : ''} · {speedMbps} Mbps · {days} day{days > 1 ? 's' : ''}
+          {volumeDiscount < 1 && (
+            <span style={{ color, fontWeight: 600 }}> · {Math.round((1 - volumeDiscount) * 100)}% off</span>
+          )}
+        </div>
+      </div>
+
+      {/* Contact details */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 12, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+          Your details
+        </div>
+        <div style={{ display: 'grid', gap: 10 }}>
+          <input placeholder="Full name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
+          <input placeholder="Phone (01XXXXXXXXX)" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <input placeholder="Address (optional)" value={address} onChange={(e) => setAddress(e.target.value)} />
+        </div>
+      </div>
+
+      {err && (
+        <div className="card" style={{ marginBottom: 12, borderColor: '#ef4444', background: '#ef44441a', color: '#fca5a5', fontSize: 13 }}>
+          {err}
+        </div>
+      )}
+
+      <button onClick={submit} disabled={submitting} className="btn" style={{ width: '100%', padding: 14, fontSize: 15 }}>
+        {submitting ? 'Placing order…' : `Order for ${sym}${price}`}
+      </button>
+    </Layout>
+  );
+}
+
+function OptionGroup({ label, value, options, format, onChange, color }) {
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{
+        fontSize: 11, color: '#94a3b8', letterSpacing: '0.15em',
+        textTransform: 'uppercase', marginBottom: 8,
+      }}>
+        {label}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${options.length}, 1fr)`, gap: 8 }}>
+        {options.map((opt) => (
+          <button
+            key={opt}
+            onClick={() => onChange(opt)}
+            style={{
+              padding: '14px 8px',
+              background: value === opt ? color : '#16161a',
+              color: value === opt ? '#0b0b0d' : '#e7e7e9',
+              border: value === opt ? `1px solid ${color}` : '1px solid #2a2a30',
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              transition: 'all 0.15s',
+            }}
+          >
+            {format(opt)}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }

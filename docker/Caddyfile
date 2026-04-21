@@ -1,24 +1,51 @@
 {
-	auto_https off
+  email {$ACME_EMAIL}
 }
 
-:80 {
-	encode zstd gzip
+# ─── Both hostnames → same stack ─────────────────────────
+# wifi.skynity.org   → public user portal (React app detects hostname)
+# admin.skynity.org  → admin operations panel
+#
+# Caddy obtains a Let's Encrypt cert for each hostname automatically.
+# The React app reads window.location.hostname and routes to the right UI.
+wifi.skynity.org, admin.skynity.org {
+  encode zstd gzip
 
-	reverse_proxy frontend:80 {
-		header_up X-Forwarded-Host {host}
-		header_up X-Forwarded-Proto http
-	}
+  # MikroTik WebFig proxy — only exposed on admin domain, protected by basicauth
+  @admin_router host admin.skynity.org
+  handle_path /router/* {
+    basicauth @admin_router {
+      admin $2a$14$bBT7TetWmczSWRFOLNCX6eOeXxni.Q1mvDV.KjFTHIbq/pWAgdpym
+    }
+    reverse_proxy @admin_router http://10.88.0.2 {
+      header_up Host 10.88.0.2
+    }
+  }
 
-	header {
-		X-Content-Type-Options nosniff
-		Referrer-Policy strict-origin-when-cross-origin
-		X-Frame-Options DENY
-		-Server
-	}
+  # API (shared by both domains)
+  handle /api/* {
+    reverse_proxy backend:3000
+  }
 
-	log {
-		output stdout
-		format console
-	}
+  # Uploaded files (logos, etc.)
+  handle /uploads/* {
+    reverse_proxy backend:3000
+  }
+
+  # Everything else → frontend SPA
+  handle {
+    reverse_proxy frontend:80
+  }
+
+  header {
+    X-Content-Type-Options nosniff
+    Referrer-Policy strict-origin-when-cross-origin
+    X-Frame-Options DENY
+    -Server
+  }
+
+  log {
+    output stdout
+    format console
+  }
 }

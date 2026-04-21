@@ -341,6 +341,75 @@ router.post('/orders', postLimiter, async (req, res) => {
 });
 
 // ============================================================
+// 2b) POST /portal/orders/custom
+// Custom-built plan — devices × speed × duration, client-computed price.
+// Creates a package on the fly (or reuses an existing CUSTOM-… one)
+// then creates an order against it so the admin approval flow works
+// without any extra code paths.
+// ============================================================
+router.post('/orders/custom', postLimiter, async (req, res) => {
+  try {
+    const { devices, speed_mbps, duration_days, price, full_name, phone, address } = req.body || {};
+
+    const n = (v) => Number(v) || 0;
+    const dev = Math.min(10, Math.max(1, Math.round(n(devices))));
+    const spd = Math.min(100, Math.max(1, Math.round(n(speed_mbps))));
+    const dur = Math.min(365, Math.max(1, Math.round(n(duration_days))));
+    const amount = Math.max(1, Math.round(n(price)));
+
+    if (!full_name || String(full_name).trim().length < 2) {
+      return res.status(400).json({ error: 'full_name required' });
+    }
+    const cleanPhone = normalisePhone(phone);
+    if (cleanPhone.length < 7) return res.status(400).json({ error: 'valid phone required' });
+
+    // Re-use a package row with the same shape so admin views don't balloon.
+    const code = `CUSTOM-${dev}D-${spd}M-${dur}D`;
+    let pkg = await db.queryOne('SELECT id, code FROM packages WHERE code = ? LIMIT 1', [code]);
+    if (!pkg) {
+      const ins = await db.query(
+        `INSERT INTO packages
+           (code, name, service_type, rate_up_mbps, rate_down_mbps, duration_days, price, description, is_active, sort_order)
+         VALUES (?, ?, 'hotspot', ?, ?, ?, ?, ?, 0, 9999)`,
+        [code, `Custom ${spd}M · ${dur}d · ${dev}dev`, spd, spd, dur, amount,
+         `Custom plan: ${dev} device${dev > 1 ? 's' : ''} · ${spd} Mbps · ${dur} days`]
+      );
+      pkg = { id: ins.insertId, code };
+    }
+
+    const orderCode = genOrderCode();
+    const r = await db.query(
+      `INSERT INTO orders
+         (order_code, package_id, full_name, phone, amount, status)
+       VALUES (?, ?, ?, ?, ?, 'pending_payment')`,
+      [orderCode, pkg.id, String(full_name).trim().slice(0, 100), cleanPhone, amount]
+    );
+
+    await db.query(
+      `INSERT INTO activity_log (actor_type, actor_id, action, entity_type, entity_id, meta, ip_address)
+       VALUES ('customer', ?, 'portal_custom_order', 'order', ?, ?, ?)`,
+      [cleanPhone, String(r.insertId),
+       JSON.stringify({ devices: dev, speed: spd, days: dur, address: address || null }), clientIp(req)]
+    );
+
+    const pay = await paymentInfo();
+    res.json({
+      ok: true,
+      order_code: orderCode,
+      order_id: r.insertId,
+      amount,
+      package: { code, name: `Custom ${spd}M · ${dur}d · ${dev}dev` },
+      payment: { bkash: pay.bkash, nagad: pay.nagad },
+      currency_symbol: pay.currency_symbol,
+      custom: { devices: dev, speed_mbps: spd, duration_days: dur },
+    });
+  } catch (err) {
+    logger.error({ err, body: req.body }, 'portal custom order failed');
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// ============================================================
 // 3) POST /portal/orders/:code/payment
 // ============================================================
 router.post('/orders/:code/payment', postLimiter, upload.single('screenshot'), async (req, res) => {

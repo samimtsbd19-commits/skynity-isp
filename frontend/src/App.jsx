@@ -52,26 +52,53 @@ function Protected({ children }) {
   return children;
 }
 
+// ─── Hostname-based routing ─────────────────────────────────
+// wifi.skynity.org   → public customer portal at /
+// admin.skynity.org  → admin panel at /
+// localhost / any other → admin panel (dev convenience)
+function isPublicHost() {
+  if (typeof window === 'undefined') return false;
+  const h = window.location.hostname;
+  // Treat anything that starts with 'admin.' as admin, everything else that
+  // starts with 'wifi.' (or a bare 'skynity.org') as public.
+  if (h.startsWith('admin.')) return false;
+  if (h.startsWith('wifi.')) return true;
+  if (h === 'skynity.org' || h === 'www.skynity.org') return true;
+  return false; // localhost + unknown → admin (dev/legacy)
+}
+
 export default function App() {
+  const publicHost = isPublicHost();
   return (
     <QueryClientProvider client={qc}>
       <AuthProvider>
         <BrowserRouter>
           <Routes>
-            {/* Public self-service portal — no auth, no admin chrome */}
-            <Route path="/portal/*" element={<PublicPortal />} />
-
-            <Route path="/login" element={<Login />} />
-            <Route
-              path="/"
-              element={
-                <Protected>
-                  <RouterProvider>
-                    <Layout />
-                  </RouterProvider>
-                </Protected>
-              }
-            >
+            {publicHost ? (
+              // ── wifi.skynity.org — public customer portal ──
+              // PublicPortal internally uses /portal/* absolute paths for navigation,
+              // so we mount it under /portal/* and redirect / → /portal/ to keep links working.
+              <>
+                <Route path="/" element={<Navigate to="/portal" replace />} />
+                <Route path="/portal/*" element={<PublicPortal />} />
+                <Route path="*" element={<Navigate to="/portal" replace />} />
+              </>
+            ) : (
+              // ── admin.skynity.org — operations panel ──
+              <>
+                {/* Old /portal path still works when accessed from admin host */}
+                <Route path="/portal/*" element={<PublicPortal />} />
+                <Route path="/login" element={<Login />} />
+                <Route
+                  path="/"
+                  element={
+                    <Protected>
+                      <RouterProvider>
+                        <Layout />
+                      </RouterProvider>
+                    </Protected>
+                  }
+                >
               <Route index element={<Dashboard />} />
               <Route path="orders" element={<Orders />} />
               <Route path="customers" element={<Customers />} />
@@ -102,8 +129,10 @@ export default function App() {
               <Route path="diagnostics" element={<Diagnostics />} />
               <Route path="live-monitor" element={<LiveMonitor />} />
               <Route path="memory" element={<Memory />} />
-            </Route>
-            <Route path="*" element={<Navigate to="/" replace />} />
+                </Route>
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </>
+            )}
           </Routes>
         </BrowserRouter>
       </AuthProvider>
