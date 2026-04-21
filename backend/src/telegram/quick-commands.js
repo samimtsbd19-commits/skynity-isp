@@ -79,30 +79,63 @@ export function registerQuickCommands(bot, { isAdmin }) {
       return bot.sendMessage(msg.chat.id, '❌ Invalid format.\nTry: `/huser 5M 30d`', { parse_mode: 'Markdown' });
     }
     try {
+      const client = await getMikrotikClient();
+
+      // 1. Pick a hotspot profile that actually exists.
+      //    Try 'default' first, then any first profile available.
+      let profileName = 'default';
+      try {
+        const profiles = await client.get('/ip/hotspot/user/profile');
+        if (Array.isArray(profiles) && profiles.length) {
+          const def = profiles.find((p) => p.name === 'default');
+          profileName = def ? def.name : profiles[0].name;
+        } else {
+          return bot.sendMessage(msg.chat.id,
+            '❌ *No hotspot user profiles on MikroTik*\n\n' +
+            'Hotspot is not set up on the router yet.\n\n' +
+            '*Fix:* Open Winbox → IP → Hotspot → Hotspot Setup wizard\n' +
+            'OR: visit `/hotspot` page → Profiles tab → Add a profile',
+            { parse_mode: 'Markdown' });
+        }
+      } catch (err) {
+        return bot.sendMessage(msg.chat.id,
+          `❌ Could not read profiles: ${err.message}\n\nIs hotspot configured on MikroTik?`);
+      }
+
       const username = `h-${randomStr(5)}`;
       const password = randomStr(8);
       const expiry = calcExpiry(dur);
       const expStr = expiry.toISOString().slice(0, 16).replace('T', ' ');
 
-      const client = await getMikrotikClient();
-      // Create the user first (with default profile)
-      await client.createHotspotUser({
-        name: username,
-        password,
-        profile: 'default',
-        comment: `quick ${speed.str}/${dur.str} exp:${expiry.toISOString().slice(0, 10)} by:tg:${msg.from.id}`,
-      });
-
-      // Then patch in the rate-limit (per-user override works)
-      const list = await client.get('/ip/hotspot/user');
-      const created = list.find((u) => u.name === username);
-      if (created) {
-        await client.patch(`/ip/hotspot/user/${encodeURIComponent(created['.id'])}`, {
-          'rate-limit': `${speed.str}/${speed.str}`,
+      // 2. Create the user.
+      try {
+        await client.createHotspotUser({
+          name: username,
+          password,
+          profile: profileName,
+          comment: `quick ${speed.str}/${dur.str} exp:${expiry.toISOString().slice(0, 10)} by:tg:${msg.from.id}`,
         });
+      } catch (err) {
+        return bot.sendMessage(msg.chat.id,
+          `❌ Create failed: ${err.message}\n\n` +
+          `Tried profile: \`${profileName}\`\n` +
+          `Username: \`${username}\``,
+          { parse_mode: 'Markdown' });
       }
 
-      // Try to extract hotspot server URL (if portal URL in settings)
+      // 3. Patch rate-limit on the user (best-effort; some setups don't allow per-user).
+      try {
+        const list = await client.get('/ip/hotspot/user');
+        const created = list.find((u) => u.name === username);
+        if (created) {
+          await client.patch(`/ip/hotspot/user/${encodeURIComponent(created['.id'])}`, {
+            'rate-limit': `${speed.str}/${speed.str}`,
+          });
+        }
+      } catch (err) {
+        logger.warn({ err: err.message }, 'rate-limit patch failed (non-fatal)');
+      }
+
       let portalUrl = '';
       try {
         const row = await db.queryOne(`SELECT setting_value FROM system_settings WHERE setting_key='site.public_base_url' LIMIT 1`);
@@ -116,9 +149,9 @@ export function registerQuickCommands(bot, { isAdmin }) {
           `🔑 Password: \`${password}\`\n` +
           `⚡ Speed: *${speed.str}/${speed.str}*\n` +
           `⏱ Valid: *${dur.str}*\n` +
-          `📅 Expires: *${expStr}*` +
-          portalUrl +
-          `\n\n_Copy credentials for the customer. Rate-limit is active immediately on MikroTik._`,
+          `📅 Expires: *${expStr}*\n` +
+          `📋 Profile: \`${profileName}\`` +
+          portalUrl,
         { parse_mode: 'Markdown' }
       );
     } catch (err) {
@@ -144,27 +177,54 @@ export function registerQuickCommands(bot, { isAdmin }) {
       return bot.sendMessage(msg.chat.id, '❌ Invalid format.\nTry: `/puser 10M 30d`', { parse_mode: 'Markdown' });
     }
     try {
+      const client = await getMikrotikClient();
+
+      // Pick a PPP profile that exists.
+      let profileName = 'default';
+      try {
+        const profiles = await client.get('/ppp/profile');
+        if (Array.isArray(profiles) && profiles.length) {
+          const def = profiles.find((p) => p.name === 'default');
+          profileName = def ? def.name : profiles[0].name;
+        } else {
+          return bot.sendMessage(msg.chat.id,
+            '❌ No PPP profiles on MikroTik. Set up PPPoE server first.');
+        }
+      } catch (err) {
+        return bot.sendMessage(msg.chat.id, `❌ Could not read PPP profiles: ${err.message}`);
+      }
+
       const username = `p-${randomStr(5)}`;
       const password = randomStr(8);
       const expiry = calcExpiry(dur);
       const expStr = expiry.toISOString().slice(0, 16).replace('T', ' ');
 
-      const client = await getMikrotikClient();
-      await client.createPppSecret({
-        name: username,
-        password,
-        profile: 'default',
-        service: 'pppoe',
-        comment: `quick ${speed.str}/${dur.str} exp:${expiry.toISOString().slice(0, 10)} by:tg:${msg.from.id}`,
-      });
-
-      // PPPoE rate-limit goes on the secret itself
-      const list = await client.listPppSecrets();
-      const created = list.find((s) => s.name === username);
-      if (created) {
-        await client.patch(`/ppp/secret/${encodeURIComponent(created['.id'])}`, {
-          'rate-limit': `${speed.str}/${speed.str}`,
+      try {
+        await client.createPppSecret({
+          name: username,
+          password,
+          profile: profileName,
+          service: 'pppoe',
+          comment: `quick ${speed.str}/${dur.str} exp:${expiry.toISOString().slice(0, 10)} by:tg:${msg.from.id}`,
         });
+      } catch (err) {
+        return bot.sendMessage(msg.chat.id,
+          `❌ Create failed: ${err.message}\n\n` +
+          `Tried profile: \`${profileName}\`\n` +
+          `Username: \`${username}\``,
+          { parse_mode: 'Markdown' });
+      }
+
+      try {
+        const list = await client.listPppSecrets();
+        const created = list.find((s) => s.name === username);
+        if (created) {
+          await client.patch(`/ppp/secret/${encodeURIComponent(created['.id'])}`, {
+            'rate-limit': `${speed.str}/${speed.str}`,
+          });
+        }
+      } catch (err) {
+        logger.warn({ err: err.message }, 'ppp rate-limit patch failed (non-fatal)');
       }
 
       await bot.sendMessage(
@@ -174,7 +234,8 @@ export function registerQuickCommands(bot, { isAdmin }) {
           `🔑 Password: \`${password}\`\n` +
           `⚡ Speed: *${speed.str}/${speed.str}*\n` +
           `⏱ Valid: *${dur.str}*\n` +
-          `📅 Expires: *${expStr}*\n\n` +
+          `📅 Expires: *${expStr}*\n` +
+          `📋 Profile: \`${profileName}\`\n\n` +
           `_Configure on customer's router:_\n` +
           `_Interface → PPPoE Client → Username + Password above_`,
         { parse_mode: 'Markdown' }
