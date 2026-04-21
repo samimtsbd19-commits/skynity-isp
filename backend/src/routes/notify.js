@@ -27,15 +27,14 @@ router.get('/channels', async (_req, res) => {
 });
 
 router.get('/log', async (req, res) => {
-  const limit  = Math.min(200, Number(req.query.limit)  || 50);
-  const offset = Math.max(0,   Number(req.query.offset) || 0);
+  const limit  = Math.min(200, parseInt(req.query.limit, 10)  || 50);
+  const offset = Math.max(0,   parseInt(req.query.offset, 10) || 0);
   const rows = await db.query(
     `SELECT id, channel, provider, target, purpose, status, error,
             triggered_by, related_order_id, related_subscription_id, created_at
        FROM notification_log
        ORDER BY id DESC
-       LIMIT ? OFFSET ?`,
-    [limit, offset]
+       LIMIT ${limit} OFFSET ${offset}`
   );
   res.json({ log: rows });
 });

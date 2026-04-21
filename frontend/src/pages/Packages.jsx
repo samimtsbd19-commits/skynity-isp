@@ -147,7 +147,6 @@ function NewPackageForm({ onClose }) {
         <Field label="Price (BDT)">
           <input type="number" step="0.01" className="input" value={form.price} onChange={up('price')} required />
         </Field>
-
         {err && (
           <div className="col-span-2 text-red text-sm font-mono px-3 py-2 border border-red/40 bg-red/5 rounded-sm">
             {err}

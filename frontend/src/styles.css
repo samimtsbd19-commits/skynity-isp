@@ -142,4 +142,15 @@
       rgba(255,255,255,0.02) 4px, rgba(255,255,255,0.02) 5px
     );
   }
+  /* Smooth page transitions */
+  .page-enter {
+    animation: fade-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+}
+
+/* Mobile sidebar — push main content when sidebar is open on desktop */
+@media (max-width: 1023px) {
+  #root > div > main {
+    padding-top: 0;
+  }
 }

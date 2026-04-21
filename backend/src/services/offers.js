@@ -27,6 +27,13 @@ import push from './push.js';
    CRUD
    ------------------------------------------------------------ */
 
+function toMysqlDatetime(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 19).replace('T', ' ');
+}
+
 function generateOfferCode() {
   const d = new Date();
   const y = String(d.getFullYear()).slice(-2);
@@ -50,8 +57,8 @@ export async function createOffer(data, adminId) {
       data.description || null,
       data.discount_label || null,
       data.featured_package_id ? Number(data.featured_package_id) : null,
-      data.starts_at || null,
-      data.ends_at || null,
+      toMysqlDatetime(data.starts_at),
+      toMysqlDatetime(data.ends_at),
       data.is_active == null ? 1 : (data.is_active ? 1 : 0),
       data.audience || 'all',
       adminId || null,
@@ -68,8 +75,10 @@ export async function updateOffer(id, patch) {
   const entries = Object.entries(patch || {}).filter(([k]) => allowed.includes(k));
   if (!entries.length) return { ok: true, changed: 0 };
   const set = entries.map(([k]) => `${k} = ?`).join(', ');
-  await db.query(`UPDATE offers SET ${set} WHERE id = ?`,
-    [...entries.map(([, v]) => v), Number(id)]);
+  const vals = entries.map(([k, v]) =>
+    (k === 'starts_at' || k === 'ends_at') ? toMysqlDatetime(v) : v
+  );
+  await db.query(`UPDATE offers SET ${set} WHERE id = ?`, [...vals, Number(id)]);
   return { ok: true, changed: entries.length };
 }
 

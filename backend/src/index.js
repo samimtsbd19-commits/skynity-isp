@@ -19,7 +19,24 @@ app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false,
 }));
-app.use(cors());
+
+// CORS: in production only allow same-origin (served behind Caddy/nginx).
+// In development allow the Vite dev server on port 5173.
+const allowedOrigins =
+  config.NODE_ENV === 'production'
+    ? [config.PUBLIC_BASE_URL].filter(Boolean)
+    : ['http://localhost:5173', 'http://127.0.0.1:5173'];
+
+app.use(cors({
+  origin: (origin, cb) => {
+    // Allow requests with no Origin header (curl, Postman, same-origin browser)
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return cb(null, true);
+    cb(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  credentials: true,
+}));
+
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
@@ -55,6 +72,15 @@ app.get('/health', async (_req, res) => {
 
 app.get('/', (_req, res) => {
   res.json({ app: config.APP_NAME, version: '0.1.0', message: 'Skynity ISP backend is running' });
+});
+
+// ---------- global error handler ----------
+// Must be defined after all routes (4-arg signature signals it to Express).
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, _next) => {
+  logger.error({ err, path: req.path, method: req.method }, 'unhandled route error');
+  const status = err.status || err.statusCode || 500;
+  res.status(status).json({ error: err.message || 'internal server error' });
 });
 
 // ---------- startup ----------

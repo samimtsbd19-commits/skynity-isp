@@ -114,11 +114,12 @@ export async function listExecutions({ routerId, scriptId, limit = 50, offset = 
   if (routerId) { where.push('router_id = ?'); params.push(routerId); }
   if (scriptId) { where.push('script_id = ?'); params.push(scriptId); }
   const clause = where.length ? 'WHERE ' + where.join(' AND ') : '';
-  params.push(Number(limit), Number(offset));
+  const limitN = parseInt(limit, 10) || 50;
+  const offsetN = parseInt(offset, 10) || 0;
   return db.query(
     `SELECT id, script_id, router_id, executed_by, status, source_preview,
             LEFT(output, 500) AS output_preview, error_message, started_at, finished_at
-     FROM script_executions ${clause} ORDER BY started_at DESC LIMIT ? OFFSET ?`,
+     FROM script_executions ${clause} ORDER BY started_at DESC LIMIT ${limitN} OFFSET ${offsetN}`,
     params
   );
 }

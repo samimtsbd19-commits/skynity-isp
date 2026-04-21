@@ -191,7 +191,34 @@ export class MikrotikClient {
 
   // ---------- Queues ----------
   async listSimpleQueues() { return this.get('/queue/simple'); }
-  async listQueueTree() { return this.get('/queue/tree'); }
+  async listQueueTree()    { return this.get('/queue/tree'); }
+
+  /**
+   * Update the max-limit of a /queue/tree item by comment tag.
+   * Used for dynamic PCQ — called by the monitoring service when
+   * measured Starlink throughput changes significantly.
+   *
+   * @param {string} commentTag  e.g. "skynity:pcq:root-dn"
+   * @param {number} maxLimitMbps  new max-limit in Mbit/s
+   * @returns {{ updated: number }} count of updated rows
+   */
+  async updateQueueTreeMaxLimit(commentTag, maxLimitMbps) {
+    const items = await this.get('/queue/tree');
+    const matches = items.filter((q) =>
+      String(q.comment || '').includes(commentTag)
+    );
+    let updated = 0;
+    for (const q of matches) {
+      try {
+        await this.patch(
+          `/queue/tree/${encodeURIComponent(q['.id'])}`,
+          { 'max-limit': `${Math.round(maxLimitMbps)}M` }
+        );
+        updated++;
+      } catch { /* best-effort */ }
+    }
+    return { updated };
+  }
 
   // ---------- Neighbors ----------
   async listNeighbors() { return this.get('/ip/neighbor'); }

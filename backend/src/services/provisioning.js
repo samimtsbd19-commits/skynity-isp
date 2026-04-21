@@ -432,9 +432,87 @@ export async function expireSubscription(subscriptionId) {
   return true;
 }
 
+/**
+ * Admin manually extends a subscription by N days.
+ * - If expired: reactivates and sets expiry = now + days
+ * - If active:  extends from current expiry + days
+ * - Re-enables user on MikroTik if it was disabled.
+ */
+export async function extendSubscription(subscriptionId, days, note = '') {
+  const sub = await db.queryOne(
+    `SELECT s.*, p.mikrotik_profile, p.code AS pkg_code,
+            c.customer_code, c.full_name
+       FROM subscriptions s
+       JOIN packages p ON p.id = s.package_id
+       JOIN customers c ON c.id = s.customer_id
+      WHERE s.id = ?`,
+    [subscriptionId]
+  );
+  if (!sub) throw new Error('Subscription not found');
+
+  const now = new Date();
+  const base = sub.status === 'active' && sub.expires_at && new Date(sub.expires_at) > now
+    ? new Date(sub.expires_at)
+    : now;
+  const newExpires = new Date(base.getTime() + days * 24 * 60 * 60 * 1000);
+
+  await db.query(
+    `UPDATE subscriptions SET expires_at = ?, status = 'active', mt_synced = 0 WHERE id = ?`,
+    [newExpires, subscriptionId]
+  );
+
+  // Re-enable on MikroTik (best-effort)
+  let mtSynced = false;
+  let mtError = null;
+  try {
+    const mt = await getMikrotikClient(sub.router_id);
+    if (sub.service_type === 'pppoe') {
+      const sec = await mt.findPppSecretByName(sub.login_username);
+      if (sec) {
+        await mt.patch(`/ppp/secret/${encodeURIComponent(sec['.id'])}`, {
+          disabled: 'false',
+          profile: sub.mikrotik_profile,
+        });
+      } else {
+        await mt.createPppSecret({
+          name: sub.login_username,
+          password: sub.login_password,
+          profile: sub.mikrotik_profile,
+          service: 'pppoe',
+          comment: `SKYNITY: ${sub.customer_code} / ${sub.full_name} / extended`,
+        });
+      }
+    } else {
+      const user = await mt.findHotspotUserByName(sub.login_username);
+      if (user) {
+        await mt.patch(`/ip/hotspot/user/${encodeURIComponent(user['.id'])}`, {
+          disabled: 'false',
+          profile: sub.mikrotik_profile,
+        });
+      }
+    }
+    mtSynced = true;
+    await db.query(
+      `UPDATE subscriptions SET mt_synced = 1, mt_last_sync_at = NOW(), mt_error = NULL WHERE id = ?`,
+      [subscriptionId]
+    );
+  } catch (err) {
+    mtError = err.message;
+    logger.warn({ err: err.message, subscriptionId }, 'extend: mikrotik re-enable failed');
+  }
+
+  logger.info(
+    { subscriptionId, days, newExpires, mtSynced, note },
+    'subscription extended by admin'
+  );
+
+  return { ok: true, new_expires_at: newExpires, mt_synced: mtSynced, mt_error: mtError };
+}
+
 export default {
   findOrCreateCustomer,
   approveOrderAndProvision,
   rejectOrder,
   expireSubscription,
+  extendSubscription,
 };

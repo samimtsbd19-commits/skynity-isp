@@ -3,12 +3,12 @@ import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, Phone, Mail, MessageCircle, Calendar, Key, Copy, Send,
-  Ban, ShieldCheck, Globe, Clock, X, Network,
+  Ban, ShieldCheck, Globe, Clock, X, Network, Check,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import {
   apiCustomer, apiNotifyChannels, apiNotifySendCredentials,
-  apiSubscriptionBandwidth,
+  apiSubscriptionBandwidth, apiExtendSubscription,
   apiSuspensionsByCustomer, apiSuspensionApply, apiSuspensionLift,
   apiStaticIpAssign, apiStaticIpClear,
   apiTunnels, apiAssignSubTunnel, apiClearSubTunnel,
@@ -154,10 +154,12 @@ function Stat({ label, children }) {
 }
 
 function SubscriptionCard({ sub }) {
+  const qc = useQueryClient();
   const expires = new Date(sub.expires_at);
   const expired = expires < new Date();
   const daysLeft = Math.ceil((expires - new Date()) / 86400000);
   const [showChart, setShowChart] = useState(false);
+  const [showExtend, setShowExtend] = useState(false);
 
   return (
     <>
@@ -193,13 +195,20 @@ function SubscriptionCard({ sub }) {
         <div className={`text-xs mt-0.5 font-mono ${expired ? 'text-red' : daysLeft < 3 ? 'text-amber' : 'text-text-mute'}`}>
           {expired ? 'Expired' : `${daysLeft} days left`}
         </div>
-        <div className="mt-3 flex justify-end gap-2">
+        <div className="mt-3 flex justify-end gap-2 flex-wrap">
           <button
             onClick={() => setShowChart((v) => !v)}
             className="btn btn-ghost text-xs"
             title="Show daily bandwidth usage"
           >
             📊 {showChart ? 'Hide' : 'Usage'}
+          </button>
+          <button
+            onClick={() => setShowExtend(true)}
+            className="btn btn-ghost text-xs text-green"
+            title="Extend subscription"
+          >
+            + Extend
           </button>
           <SendCredentialsButton subscriptionId={sub.id} />
         </div>
@@ -210,7 +219,124 @@ function SubscriptionCard({ sub }) {
         <BandwidthChart fetcher={(days) => apiSubscriptionBandwidth(sub.id, days)} />
       </div>
     )}
+    {showExtend && (
+      <ExtendModal
+        sub={sub}
+        onClose={() => setShowExtend(false)}
+        onSuccess={() => {
+          setShowExtend(false);
+          qc.invalidateQueries({ queryKey: ['customer'] });
+        }}
+      />
+    )}
     </>
+  );
+}
+
+const EXTEND_PRESETS = [
+  { label: '7 days', days: 7 },
+  { label: '10 days', days: 10 },
+  { label: '15 days', days: 15 },
+  { label: '30 days', days: 30 },
+  { label: '60 days', days: 60 },
+  { label: 'Custom', days: null },
+];
+
+function ExtendModal({ sub, onClose, onSuccess }) {
+  const [preset, setPreset] = useState(30);
+  const [custom, setCustom] = useState('');
+  const [note, setNote] = useState('');
+  const [result, setResult] = useState(null);
+
+  const extend = useMutation({
+    mutationFn: () => {
+      const days = preset === null ? parseInt(custom, 10) : preset;
+      return apiExtendSubscription(sub.id, days, note);
+    },
+    onSuccess: (data) => {
+      setResult(data);
+      setTimeout(onSuccess, 1500);
+    },
+  });
+
+  const days = preset === null ? parseInt(custom, 10) || 0 : preset;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.7)' }}
+      onClick={onClose}
+    >
+      <div className="panel p-6 max-w-sm w-full space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-display text-xl italic">Extend subscription</h3>
+          <button onClick={onClose} className="text-text-mute hover:text-amber"><X size={16} /></button>
+        </div>
+
+        <div className="text-xs font-mono text-text-mute bg-surface2 rounded px-3 py-2">
+          <div>{sub.package_name} · {sub.login_username}</div>
+          <div>Current expiry: {new Date(sub.expires_at).toLocaleDateString()}</div>
+        </div>
+
+        <div>
+          <label className="block text-[10px] text-text-mute font-mono uppercase mb-2">Add days</label>
+          <div className="grid grid-cols-3 gap-2">
+            {EXTEND_PRESETS.map((p) => (
+              <button
+                key={p.label}
+                onClick={() => setPreset(p.days)}
+                className={`btn btn-sm ${preset === p.days ? 'btn-primary' : 'btn-ghost'}`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          {preset === null && (
+            <input
+              type="number" min="1" max="3650"
+              className="input input-sm w-full mt-2"
+              placeholder="Enter number of days"
+              value={custom}
+              onChange={(e) => setCustom(e.target.value)}
+            />
+          )}
+        </div>
+
+        <div>
+          <label className="block text-[10px] text-text-mute font-mono uppercase mb-2">Note (optional)</label>
+          <input
+            className="input input-sm w-full"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="e.g. Payment received offline"
+          />
+        </div>
+
+        {result && (
+          <div className="text-xs font-mono text-green bg-green/10 border border-green/30 rounded px-3 py-2">
+            ✓ Extended! New expiry: {new Date(result.new_expires_at).toLocaleDateString()}
+            {result.mt_error && <div className="text-amber mt-1">⚠ MikroTik: {result.mt_error}</div>}
+          </div>
+        )}
+
+        {extend.isError && (
+          <div className="text-xs text-red font-mono">
+            {extend.error?.response?.data?.error || extend.error?.message}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2 border-t border-border-dim">
+          <button onClick={onClose} className="btn btn-ghost">Cancel</button>
+          <button
+            onClick={() => extend.mutate()}
+            className="btn btn-primary"
+            disabled={extend.isPending || days < 1 || result}
+          >
+            <Check size={14} /> {extend.isPending ? 'Extending…' : `Add ${days || '?'} days`}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

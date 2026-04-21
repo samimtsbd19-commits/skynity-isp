@@ -244,6 +244,9 @@ export const apiRunExpiryReminders = () =>
 export const apiSubscriptionBandwidth = (id, days = 14) =>
   api.get(`/subscriptions/${id}/bandwidth`, { params: { days } }).then((r) => r.data.days);
 
+export const apiExtendSubscription = (id, days, note = '') =>
+  api.post(`/subscriptions/${id}/extend`, { days, note }).then((r) => r.data);
+
 // ---------- Monitoring (per-router CPU/RAM/temp/SFP/ping/…) ----
 export const apiMonitorRouters       = () => api.get('/monitoring/routers').then((r) => r.data.routers);
 export const apiMonitorRouter        = (id) => api.get(`/monitoring/routers/${id}`).then((r) => r.data);

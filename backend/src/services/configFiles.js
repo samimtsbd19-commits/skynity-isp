@@ -49,11 +49,12 @@ export async function getConfigFile(id) {
 }
 
 export async function listConfigFiles({ limit = 100, offset = 0 } = {}) {
+  const limitN = parseInt(limit, 10) || 100;
+  const offsetN = parseInt(offset, 10) || 0;
   return db.query(
     `SELECT id, name, description, file_type, file_size, checksum_sha256, uploaded_by,
             tags, is_public, download_count, created_at
-     FROM config_files ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-    [Number(limit), Number(offset)]
+     FROM config_files ORDER BY created_at DESC LIMIT ${limitN} OFFSET ${offsetN}`
   );
 }
 

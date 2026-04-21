@@ -1,10 +1,11 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { ErrorBoundary } from './primitives';
 import {
   LayoutDashboard, Users, Inbox, Package, Radio,
   Activity, Router as RouterIcon, LogOut, Satellite,
   ScrollText, Settings, FileCode, Shield, Terminal,
   RefreshCw, UserCog, Cog, Ticket, ChevronDown, UserCheck,
-  HeartPulse, Globe, Megaphone, Gauge, Ban, TrendingUp, ShieldAlert,
+  HeartPulse, Globe, Megaphone, Gauge, Ban, TrendingUp, ShieldAlert, Menu, X,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
@@ -112,9 +113,13 @@ export default function Layout() {
   }, [pathname]);
 
   const [openGroups, setOpenGroups] = useState(() => ({ [activeGroup]: true }));
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   useEffect(() => {
     setOpenGroups((prev) => ({ ...prev, [activeGroup]: true }));
   }, [activeGroup]);
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [pathname]);
   const toggleGroup = (key) =>
     setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
 
@@ -152,8 +157,30 @@ export default function Layout() {
 
   return (
     <div className="h-screen flex text-text overflow-hidden">
+      {/* Mobile hamburger — only visible on small screens */}
+      <button
+        className="lg:hidden fixed top-3 left-3 z-50 p-2 rounded-sm bg-surface border border-border text-text-dim hover:text-amber transition-colors"
+        onClick={() => setMobileSidebarOpen((v) => !v)}
+        aria-label="Toggle navigation"
+      >
+        {mobileSidebarOpen ? <X size={16} /> : <Menu size={16} />}
+      </button>
+
+      {/* Mobile overlay backdrop */}
+      {mobileSidebarOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-30 bg-black/60 backdrop-blur-sm"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
+
       {/* ─────────── Sidebar ─────────── */}
-      <aside className="w-60 shrink-0 bg-surface border-r border-border flex flex-col relative">
+      <aside className={clsx(
+        'w-60 shrink-0 bg-surface border-r border-border flex flex-col relative',
+        'fixed lg:static inset-y-0 left-0 z-40',
+        'transition-transform duration-200',
+        mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+      )}>
         <div className="absolute inset-0 grid-overlay pointer-events-none" />
 
         {/* brand */}
@@ -317,8 +344,10 @@ export default function Layout() {
       </aside>
 
       {/* ─────────── Main content ─────────── */}
-      <main className="flex-1 min-w-0 overflow-y-auto">
-        <Outlet />
+      <main className="flex-1 min-w-0 overflow-y-auto lg:ml-0 w-full">
+        <ErrorBoundary>
+          <Outlet />
+        </ErrorBoundary>
       </main>
     </div>
   );

@@ -1,5 +1,6 @@
+import { Component } from 'react';
 import clsx from 'clsx';
-import { TrendingUp, TrendingDown } from 'lucide-react';
+import { TrendingUp, TrendingDown, AlertOctagon, RefreshCw } from 'lucide-react';
 
 export function StatCard({ label, value, unit, hint, trend, icon: Icon, accent, loading }) {
   const trendPositive = trend?.startsWith('+');
@@ -71,6 +72,34 @@ export function StatusPill({ status }) {
 
 export function Skeleton({ className = '' }) {
   return <div className={`bg-surface2 rounded-sm animate-pulse ${className}`} />;
+}
+
+export class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) { return { error }; }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="min-h-[300px] flex flex-col items-center justify-center gap-4 p-8 text-center">
+        <AlertOctagon size={40} className="text-red" strokeWidth={1} />
+        <div>
+          <div className="text-display text-2xl text-red italic mb-1">Something went wrong</div>
+          <div className="text-sm text-text-mute font-mono max-w-sm">
+            {this.state.error?.message || 'An unexpected error occurred.'}
+          </div>
+        </div>
+        <button
+          onClick={() => this.setState({ error: null })}
+          className="btn btn-ghost text-xs"
+        >
+          <RefreshCw size={13} /> Try again
+        </button>
+      </div>
+    );
+  }
 }
 
 export function ConfirmButton({ children, onConfirm, variant = 'ghost', confirmText = 'Are you sure?' }) {

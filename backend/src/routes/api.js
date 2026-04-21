@@ -2,7 +2,8 @@ import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import db from '../database/pool.js';
 import { signAdminToken, requireAdmin, requireRole } from '../middleware/auth.js';
-import { approveOrderAndProvision, rejectOrder } from '../services/provisioning.js';
+import { rateLimit } from '../middleware/rateLimit.js';
+import { approveOrderAndProvision, rejectOrder, extendSubscription } from '../services/provisioning.js';
 import { getMikrotikClient } from '../mikrotik/client.js';
 import configsRouter from './configs.js';
 import vpnRouter from './vpn.js';
@@ -84,7 +85,14 @@ function routerIdFromQuery(q) {
 }
 
 // ===================== AUTH =====================
-router.post('/auth/login', async (req, res) => {
+const loginRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: 'Too many login attempts. Please wait 15 minutes.',
+  keyFn: (req) => `login:${req.ip}`,
+});
+
+router.post('/auth/login', loginRateLimit, async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'username/password required' });
   const ip = clientIp(req);
@@ -157,12 +165,11 @@ router.post('/auth/change-password', requireAdmin, async (req, res) => {
 });
 
 router.get('/activity-log', requireAdmin, async (req, res) => {
-  const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
-  const offset = Math.max(Number(req.query.offset) || 0, 0);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
   const rows = await db.query(
     `SELECT id, actor_type, actor_id, action, entity_type, entity_id, meta, ip_address, created_at
-     FROM activity_log ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-    [limit, offset]
+     FROM activity_log ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`
   );
   const cnt = await db.queryOne('SELECT COUNT(*) AS c FROM activity_log');
   res.json({ entries: rows, total: Number(cnt.c) });
@@ -313,7 +320,9 @@ router.get('/stats/revenue', requireAdmin, async (req, res) => {
 
 // ===================== CUSTOMERS =====================
 router.get('/customers', requireAdmin, async (req, res) => {
-  const { q, limit = 50, offset = 0 } = req.query;
+  const { q } = req.query;
+  const limitN = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
+  const offsetN = Math.max(parseInt(req.query.offset, 10) || 0, 0);
   const params = [];
   let where = '';
   if (q) {
@@ -321,7 +330,6 @@ router.get('/customers', requireAdmin, async (req, res) => {
     const like = `%${q}%`;
     params.push(like, like, like);
   }
-  params.push(Number(limit), Number(offset));
   const rows = await db.query(
     `SELECT c.*,
             COUNT(s.id) AS subscription_count,
@@ -331,7 +339,7 @@ router.get('/customers', requireAdmin, async (req, res) => {
      ${where}
      GROUP BY c.id
      ORDER BY c.created_at DESC
-     LIMIT ? OFFSET ?`,
+     LIMIT ${limitN} OFFSET ${offsetN}`,
     params
   );
   res.json({ customers: rows });
@@ -356,11 +364,12 @@ router.get('/customers/:id', requireAdmin, async (req, res) => {
 
 // ===================== ORDERS =====================
 router.get('/orders', requireAdmin, async (req, res) => {
-  const { status, limit = 50, offset = 0 } = req.query;
+  const { status } = req.query;
+  const limitN = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
+  const offsetN = Math.max(parseInt(req.query.offset, 10) || 0, 0);
   const params = [];
   let where = '';
   if (status) { where = 'WHERE o.status = ?'; params.push(status); }
-  params.push(Number(limit), Number(offset));
   const rows = await db.query(
     `SELECT o.*, p.name AS package_name, p.code AS package_code, c.full_name AS customer_name
      FROM orders o
@@ -368,7 +377,7 @@ router.get('/orders', requireAdmin, async (req, res) => {
      LEFT JOIN customers c ON c.id = o.customer_id
      ${where}
      ORDER BY o.created_at DESC
-     LIMIT ? OFFSET ?`,
+     LIMIT ${limitN} OFFSET ${offsetN}`,
     params
   );
   res.json({ orders: rows });
@@ -427,11 +436,12 @@ router.patch('/packages/:id', requireAdmin, requireRole('superadmin', 'admin'), 
 
 // ===================== SUBSCRIPTIONS =====================
 router.get('/subscriptions', requireAdmin, async (req, res) => {
-  const { status, limit = 50, offset = 0 } = req.query;
+  const { status } = req.query;
+  const limitN = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
+  const offsetN = Math.max(parseInt(req.query.offset, 10) || 0, 0);
   const params = [];
   let where = '';
   if (status) { where = 'WHERE s.status = ?'; params.push(status); }
-  params.push(Number(limit), Number(offset));
   const rows = await db.query(
     `SELECT s.*, c.full_name, c.phone, c.customer_code, p.name AS package_name, p.code AS package_code
      FROM subscriptions s
@@ -439,10 +449,23 @@ router.get('/subscriptions', requireAdmin, async (req, res) => {
      JOIN packages p ON p.id = s.package_id
      ${where}
      ORDER BY s.created_at DESC
-     LIMIT ? OFFSET ?`,
+     LIMIT ${limitN} OFFSET ${offsetN}`,
     params
   );
   res.json({ subscriptions: rows });
+});
+
+// POST /subscriptions/:id/extend — admin manually adds N days
+router.post('/subscriptions/:id/extend', requireAdmin, requireRole('superadmin', 'admin'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'invalid id' });
+    const days = parseInt(req.body.days, 10);
+    if (!days || days < 1 || days > 3650) return res.status(400).json({ error: 'days must be 1–3650' });
+    const note = String(req.body.note || '').slice(0, 200);
+    const result = await extendSubscription(id, days, note);
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ===================== BANDWIDTH =========================

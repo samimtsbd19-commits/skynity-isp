@@ -100,14 +100,15 @@ export async function listVouchers({ batchId, redeemed, limit = 200, offset = 0 
   if (redeemed === true || redeemed === 'true')   { where.push('v.is_redeemed = 1'); }
   if (redeemed === false || redeemed === 'false') { where.push('v.is_redeemed = 0'); }
   const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  params.push(Number(limit), Number(offset));
+  const limitN = parseInt(limit, 10) || 50;
+  const offsetN = parseInt(offset, 10) || 0;
 
   return db.query(
     `SELECT v.*, p.name AS package_name, p.code AS package_code, p.price
      FROM vouchers v JOIN packages p ON p.id = v.package_id
      ${w}
      ORDER BY v.created_at DESC, v.id DESC
-     LIMIT ? OFFSET ?`,
+     LIMIT ${limitN} OFFSET ${offsetN}`,
     params
   );
 }

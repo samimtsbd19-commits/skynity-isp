@@ -43,13 +43,14 @@ export async function listEvents({ limit = 100, offset = 0, eventType = null, ho
   let where = '1=1';
   if (eventType) { where += ' AND event_type = ?'; params.push(eventType); }
   if (hours) { where += ' AND created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)'; params.push(Number(hours)); }
-  params.push(Number(limit), Number(offset));
+  const limitN = parseInt(limit, 10) || 100;
+  const offsetN = parseInt(offset, 10) || 0;
   return db.query(
     `SELECT id, event_type, severity, ip, user_agent, admin_id, subject, meta, created_at
        FROM security_events
       WHERE ${where}
       ORDER BY id DESC
-      LIMIT ? OFFSET ?`,
+      LIMIT ${limitN} OFFSET ${offsetN}`,
     params
   );
 }

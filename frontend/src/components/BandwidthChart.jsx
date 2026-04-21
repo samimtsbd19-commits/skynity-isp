@@ -95,7 +95,7 @@ export default function BandwidthChart({ fetcher, defaultDays = 14, compact = fa
                   className="flex-1 flex flex-col justify-end gap-px min-w-[6px]"
                   title={`${r.day}\n↓ ${fmtBytes(r.bytes_in)}\n↑ ${fmtBytes(r.bytes_out)}\ntotal ${fmtBytes(total)}`}
                 >
-                  <div style={{ height: `${outH}%` }} className="bg-cyan-500/70 rounded-t-sm" />
+                  <div style={{ height: `${outH}%` }} className="bg-cyan/70 rounded-t-sm" />
                   <div style={{ height: `${inH}%`  }} className="bg-amber/80" />
                 </div>
               );

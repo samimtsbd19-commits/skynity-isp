@@ -1,39 +1,16 @@
-# ============================================================
-# Caddy reverse proxy — automatic HTTPS for Skynity ISP
-# ------------------------------------------------------------
-# Caddy auto-obtains + renews Let's Encrypt certificates for
-# the domain configured via the DOMAIN env var.
-#
-# Architecture:
-#   Browser ──https──► caddy ──http──► frontend (nginx)
-#                                       ├─► static SPA (/)
-#                                       ├─► /api/     → backend:3000
-#                                       └─► /api/ws/  → backend:3000 (WebSocket)
-#
-# Caddy just forwards everything to the frontend container; the
-# frontend's own nginx knows how to split /api and WebSocket
-# traffic to the backend. This keeps the routing logic in one place.
-# ============================================================
-
 {
-	email {$ACME_EMAIL}
-	# Uncomment during testing to use Let's Encrypt staging (avoid rate limits):
-	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+	auto_https off
 }
 
-{$DOMAIN} {
+:80 {
 	encode zstd gzip
 
-	# Proxy everything (HTML, assets, /api/*, /api/ws/*) to frontend.
-	# Caddy's reverse_proxy handles WebSocket upgrades automatically.
 	reverse_proxy frontend:80 {
 		header_up X-Forwarded-Host {host}
-		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-Proto http
 	}
 
-	# Security headers
 	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
 		X-Frame-Options DENY
@@ -45,7 +22,3 @@
 		format console
 	}
 }
-
-# HTTP on :80 auto-redirects to HTTPS (Caddy default behaviour).
-# To deploy WITHOUT a domain (plain HTTP on VPS IP), replace
-# "{$DOMAIN}" above with ":80" and remove the `email` global.

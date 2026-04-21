@@ -343,6 +343,7 @@ export function startJobs() {
   cron.schedule('* * * * *',    () => guard('liftExpired', () => suspensions.liftExpired())
     .catch((e) => logger.error({ e }, 'suspension auto-lift')));
 
+
   // Weekly: trim old security audit rows
   cron.schedule('15 4 * * 0',   () => guard('securityPrune', () => security.pruneOld(90))
     .catch((e) => logger.error({ e }, 'security prune')));

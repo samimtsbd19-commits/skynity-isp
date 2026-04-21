@@ -485,12 +485,114 @@ export async function refreshDeviceInfo(router) {
 }
 
 // ============================================================
+// Dynamic PCQ — auto-adjust MikroTik queue max-limit based on
+// measured peak Starlink throughput.
+// ------------------------------------------------------------
+// Every monitoring tick we read the uplink interface rx/tx bps
+// from the most-recent router_interface_metrics row.
+// We track a 30-minute rolling peak — the highest throughput
+// seen in the last 6 samples (5-min interval × 6 = 30 min).
+// If the peak differs from the current uplink_down_mbps by
+// more than 8% we:
+//   1. Update mikrotik_routers.uplink_down/up_mbps in DB
+//   2. Update the /queue/tree max-limit on the router itself
+//      (items tagged with "skynity:pcq:" in their comment)
+//
+// Why peak and not average?
+//   Average underestimates capacity at low-load times.
+//   Peak catches "what Starlink actually delivered recently"
+//   which is the best proxy for available capacity.
+// ============================================================
+export async function updateDynamicPcq(router) {
+  if (!router.uplink_interface) return { ok: false, reason: 'no uplink_interface set' };
+
+  try {
+    // Read the last 6 interface metric samples for this uplink
+    // (covers ~30 minutes at the default 5-min poll interval).
+    const rows = await db.query(
+      `SELECT rx_bps, tx_bps, taken_at
+         FROM router_interface_metrics
+        WHERE router_id = ? AND interface_name = ?
+          AND taken_at > NOW() - INTERVAL 35 MINUTE
+        ORDER BY taken_at DESC
+        LIMIT 6`,
+      [router.id, router.uplink_interface]
+    );
+
+    if (!rows.length) return { ok: false, reason: 'no interface metrics yet' };
+
+    // rx_bps on the WAN uplink = what users are downloading (Starlink→MikroTik)
+    // tx_bps on the WAN uplink = what users are uploading (MikroTik→Starlink)
+    const peakDownBps = Math.max(...rows.map((r) => Number(r.rx_bps) || 0));
+    const peakUpBps   = Math.max(...rows.map((r) => Number(r.tx_bps) || 0));
+
+    const peakDownMbps = Math.round(peakDownBps / 1_000_000);
+    const peakUpMbps   = Math.round(peakUpBps   / 1_000_000);
+
+    // Guard: never set below 10 Mbps (bad sample / no active users)
+    if (peakDownMbps < 10) return { ok: false, reason: 'peak too low — link idle or no users' };
+
+    // Retrieve admin-configured maximum (hard ceiling).
+    // Falls back to 1000 Mbps if not set.
+    const adminMaxDown = Math.max(10, Number(router.uplink_down_mbps) || 1000);
+    const adminMaxUp   = Math.max(1,  Number(router.uplink_up_mbps)   || 1000);
+
+    // The new PCQ cap = measured peak, capped by admin maximum.
+    // We add a 5% headroom so burst traffic isn't artificially cut.
+    const newDown = Math.min(Math.round(peakDownMbps * 1.05), adminMaxDown);
+    const newUp   = Math.min(Math.round(peakUpMbps   * 1.05), adminMaxUp);
+
+    // Only act if change > 8% (avoid thrashing on minor fluctuations).
+    const prevDown = Number(router.uplink_down_mbps) || 0;
+    const prevUp   = Number(router.uplink_up_mbps)   || 0;
+    const downChanged = prevDown === 0 || Math.abs(newDown - prevDown) / prevDown > 0.08;
+    const upChanged   = prevUp   === 0 || Math.abs(newUp   - prevUp)   / prevUp   > 0.08;
+
+    if (!downChanged && !upChanged) {
+      return { ok: true, action: 'no-change', peakDownMbps, peakUpMbps };
+    }
+
+    // 1. Push new max-limit to MikroTik queue tree (best-effort).
+    const mt = await getMikrotikClient(router.id);
+    const [dnResult, upResult] = await Promise.all([
+      downChanged ? mt.updateQueueTreeMaxLimit('skynity:pcq:root-dn', newDown)
+                     .catch((e) => ({ updated: 0, error: e.message }))
+                 : Promise.resolve({ updated: 0, skipped: true }),
+      upChanged   ? mt.updateQueueTreeMaxLimit('skynity:pcq:root-up', newUp)
+                     .catch((e) => ({ updated: 0, error: e.message }))
+                 : Promise.resolve({ updated: 0, skipped: true }),
+    ]);
+
+    // 2. Update DB so bandwidth overview reflects current values.
+    await db.query(
+      `UPDATE mikrotik_routers
+          SET uplink_down_mbps = ?,
+              uplink_up_mbps   = ?,
+              last_seen_at     = NOW()
+        WHERE id = ?`,
+      [newDown, newUp, router.id]
+    );
+
+    logger.info(
+      { router_id: router.id, prevDown, newDown, prevUp, newUp, dnResult, upResult },
+      'dynamic PCQ updated'
+    );
+
+    return { ok: true, action: 'updated', prevDown, newDown, prevUp, newUp };
+  } catch (err) {
+    logger.warn({ err: err.message, router_id: router.id }, 'updateDynamicPcq failed');
+    return { ok: false, error: err.message };
+  }
+}
+
+// ============================================================
 // Top-level orchestrator — runs every few minutes.
 // ============================================================
 export async function pollAllRouters() {
   if (!(await getSetting('monitoring.enabled'))) return { ok: true, skipped: 'disabled' };
   const routers = await db.query(
-    `SELECT id, name, host FROM mikrotik_routers WHERE is_active = 1`
+    `SELECT id, name, host, uplink_interface, uplink_down_mbps, uplink_up_mbps
+       FROM mikrotik_routers WHERE is_active = 1`
   );
   const results = [];
   for (const r of routers) {
@@ -501,6 +603,7 @@ export async function pollAllRouters() {
       ping:       await samplePing(r),
       neighbors:  await sampleNeighbors(r),
       queues:     await sampleQueues(r),
+      dynamicPcq: await updateDynamicPcq(r),
     });
   }
   return { ok: true, routers: results.length };
@@ -529,5 +632,5 @@ export async function pruneMetrics() {
 
 export default {
   sampleRouter, sampleInterfaces, samplePing, sampleNeighbors, sampleQueues,
-  refreshDeviceInfo, pollAllRouters, pruneMetrics,
+  refreshDeviceInfo, pollAllRouters, pruneMetrics, updateDynamicPcq,
 };

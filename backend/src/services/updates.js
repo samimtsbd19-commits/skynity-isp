@@ -118,11 +118,12 @@ export async function listTasks({ routerId, limit = 50, offset = 0 } = {}) {
   const params = [];
   let where = '';
   if (routerId) { where = 'WHERE router_id = ?'; params.push(routerId); }
-  params.push(Number(limit), Number(offset));
+  const limitN = parseInt(limit, 10) || 50;
+  const offsetN = parseInt(offset, 10) || 0;
   return db.query(
     `SELECT id, router_id, action, channel, package_name, installed_version, latest_version,
             status, output, error_message, requested_by, started_at, finished_at
-     FROM update_tasks ${where} ORDER BY started_at DESC LIMIT ? OFFSET ?`,
+     FROM update_tasks ${where} ORDER BY started_at DESC LIMIT ${limitN} OFFSET ${offsetN}`,
     params
   );
 }
