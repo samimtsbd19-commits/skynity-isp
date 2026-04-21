@@ -161,6 +161,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - uploads:/app/uploads
+      - ./docs:/app/docs
     expose:
       - "3000"
     healthcheck:

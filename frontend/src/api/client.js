@@ -401,6 +401,9 @@ export const apiHotspotTemplateReset    = () => api.delete('/hotspot/template').
 export const apiHotspotVisualSettings   = () => api.get('/hotspot/template/visual').then((r) => r.data.settings);
 export const apiHotspotVisualSave       = (s) => api.put('/hotspot/template/visual', s).then((r) => r.data);
 export const apiHotspotGenerate         = (opts) => api.post('/hotspot/template/generate', opts).then((r) => r.data.html);
+export const apiGuideGet   = () => api.get('/guide').then((r) => r.data);
+export const apiGuideSave  = (markdown) => api.put('/guide', { markdown }).then((r) => r.data);
+
 export const apiHotspotLogoUpload       = (file) => {
   const fd = new FormData();
   fd.append('logo', file);
