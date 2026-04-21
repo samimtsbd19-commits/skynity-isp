@@ -6,7 +6,7 @@ import {
   ScrollText, Settings, FileCode, Shield, Terminal, Wifi,
   RefreshCw, UserCog, Cog, Ticket, ChevronDown, UserCheck,
   HeartPulse, Globe, Megaphone, Gauge, Ban, TrendingUp, ShieldAlert, Menu, X,
-  BookOpen, Stethoscope,
+  BookOpen, Stethoscope, Brain,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
@@ -69,6 +69,7 @@ const GROUPS = [
       { to: '/activity', label: 'nav.audit',    icon: ScrollText },
       { to: '/settings', label: 'Profile',      icon: Settings },
       { to: '/diagnostics', label: 'Diagnostics', icon: Stethoscope },
+      { to: '/memory',   label: 'AI Memory',      icon: Brain },
       { to: '/guide',    label: 'Project Guide', icon: BookOpen },
     ],
   },

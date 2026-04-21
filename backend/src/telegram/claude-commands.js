@@ -10,6 +10,14 @@ import {
   stopTelegramPolling,
   startTelegramPolling,
 } from './poll-control.js';
+import { readAllMemory } from '../routes/memory.js';
+
+// Build system prompt: static project facts + live memory from docs/memory/
+async function buildSystemPrompt() {
+  const memory = await readAllMemory().catch(() => '');
+  if (!memory) return SKYNITY_SYSTEM;
+  return `${SKYNITY_SYSTEM}\n\n## Shared Memory (docs/memory/)\n${memory}`;
+}
 
 const MAX_MSG = 20;
 
@@ -166,7 +174,8 @@ export function registerClaudeAi(bot, { isAdmin, setSession, clearSession }) {
       return bot.sendMessage(msg.chat.id, 'AI disabled — check System Settings (ai.claude.enabled + OpenRouter or Anthropic key).');
     }
     try {
-      const reply = await claude.chat({ userMessage: match[1].trim(), systemExtra: SKYNITY_SYSTEM });
+      const systemExtra = await buildSystemPrompt();
+      const reply = await claude.chat({ userMessage: match[1].trim(), systemExtra });
       await bot.sendMessage(msg.chat.id, truncateTelegram(reply.text, 3900));
     } catch (err) {
       await bot.sendMessage(msg.chat.id, `❌ ${err.message}`);
@@ -217,7 +226,8 @@ export async function handleAiChatMessage(bot, msg, session, { setSession, isAdm
   if (messages.length > MAX_MSG) messages = messages.slice(-MAX_MSG);
 
   try {
-    const reply = await claude.continueChat({ model, messages, systemExtra: SKYNITY_SYSTEM });
+    const systemExtra = await buildSystemPrompt();
+    const reply = await claude.continueChat({ model, messages, systemExtra });
     messages.push({ role: 'assistant', content: reply.text });
     if (messages.length > MAX_MSG) messages = messages.slice(-MAX_MSG);
 

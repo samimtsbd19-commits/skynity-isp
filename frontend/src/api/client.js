@@ -415,6 +415,13 @@ export const apiLiveDashboard      = (rid) => api.get(`/diagnostics/mikrotik/das
 export const apiHotspotAudit       = (rid) => api.get('/diagnostics/hotspot/audit', { params: rid ? { routerId: rid } : {} }).then((r) => r.data);
 export const apiHotspotFix         = (action, body = {}) => api.post(`/diagnostics/hotspot/fix/${action}`, body).then((r) => r.data);
 
+// ── Memory (shared AI context, lives in docs/memory/) ──────
+export const apiMemoryList      = () => api.get('/memory').then((r) => r.data);
+export const apiMemoryRead      = (file) => api.get(`/memory/${encodeURIComponent(file)}`).then((r) => r.data);
+export const apiMemorySave      = (file, content) => api.put(`/memory/${encodeURIComponent(file)}`, { content }).then((r) => r.data);
+export const apiMemoryDelete    = (file) => api.delete(`/memory/${encodeURIComponent(file)}`).then((r) => r.data);
+export const apiMemoryCombined  = () => api.get('/memory/export/combined').then((r) => r.data);
+
 export const apiHotspotLogoUpload       = (file) => {
   const fd = new FormData();
   fd.append('logo', file);
