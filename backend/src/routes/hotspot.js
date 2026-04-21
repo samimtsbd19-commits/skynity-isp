@@ -2,12 +2,36 @@
 // /api/hotspot — Hotspot management (users, profiles, active, hosts, log, template, server lock)
 // ============================================================
 import { Router } from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import { requireAdmin, requireRole } from '../middleware/auth.js';
 import { getMikrotikClient } from '../mikrotik/client.js';
 import * as settings from '../services/settings.js';
 import * as gen from '../services/configGenerator.js';
 
 const router = Router();
+
+// ── Logo upload (multer) ──────────────────────────────────────
+const UPLOAD_DIR = path.resolve('/app/uploads');
+const logoStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    cb(null, UPLOAD_DIR);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase() || '.png';
+    cb(null, `portal-logo-${Date.now()}${ext}`);
+  },
+});
+const logoUpload = multer({
+  storage: logoStorage,
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (/^image\/(png|jpeg|jpg|gif|svg\+xml|webp)$/.test(file.mimetype)) cb(null, true);
+    else cb(new Error('Only image files allowed'));
+  },
+});
 
 function routerId(req) {
   const v = req.query.routerId || req.query.router_id;
@@ -216,6 +240,62 @@ router.delete('/template', requireAdmin, requireRole('superadmin', 'admin'), asy
     res.status(500).json({ error: err.message });
   }
 });
+
+// ── Visual settings: GET/PUT ──────────────────────────────────
+const VISUAL_KEYS = [
+  'site.name', 'portal.tagline', 'branding.primary_color', 'portal.bg_color',
+  'portal.card_bg', 'portal.text_color', 'portal.font_size', 'portal.font_family',
+  'branding.logo_url', 'portal.logo_position', 'portal.login_title',
+  'site.support_phone', 'site.currency_symbol', 'portal.border_radius', 'portal.dark_mode',
+];
+
+router.get('/template/visual', requireAdmin, async (req, res) => {
+  try {
+    const out = {};
+    for (const k of VISUAL_KEYS) out[k] = await settings.getSetting(k);
+    res.json({ settings: out });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/template/visual', requireAdmin, requireRole('superadmin', 'admin'), async (req, res) => {
+  try {
+    const body = req.body || {};
+    for (const k of VISUAL_KEYS) {
+      if (k in body) await settings.setSetting(k, body[k]);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Generate preview HTML from visual opts (no save) ─────────
+router.post('/template/generate', requireAdmin, async (req, res) => {
+  try {
+    const html = await gen.generatePortalHtml(req.body || {});
+    res.json({ html });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Logo upload ───────────────────────────────────────────────
+router.post('/template/logo', requireAdmin, requireRole('superadmin', 'admin'),
+  logoUpload.single('logo'),
+  async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+      const publicBase = (await settings.getSetting('site.public_base_url')) || '';
+      const url = `${publicBase.replace(/\/$/, '')}/uploads/${req.file.filename}`;
+      await settings.setSetting('branding.logo_url', url);
+      res.json({ ok: true, url, filename: req.file.filename });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
 
 // ── App log (MikroTik system log) ────────────────────────────
 router.get('/applog', requireAdmin, async (req, res) => {

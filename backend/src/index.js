@@ -44,6 +44,9 @@ app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 // x-forwarded-for are honoured by the portal rate-limiter
 app.set('trust proxy', 1);
 
+// ---------- Uploads (logos, etc.) ----------
+app.use('/uploads', express.static('/app/uploads', { maxAge: '7d' }));
+
 // ---------- API (includes token-protected admin + public /portal) ----------
 app.use('/api', apiRoutes);
 

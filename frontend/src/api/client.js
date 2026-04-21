@@ -395,6 +395,14 @@ export const apiAppLog         = (topics, rid) => api.get('/hotspot/applog', { .
 export const apiHotspotServers     = (rid) => api.get('/hotspot/server', hsParams(rid)).then((r) => r.data.servers);
 export const apiHotspotServerLock  = (id, locked, rid) => api.post(`/hotspot/server/${id}/lock`, { locked }, hsParams(rid)).then((r) => r.data);
 
-export const apiHotspotTemplate       = () => api.get('/hotspot/template').then((r) => r.data);
-export const apiHotspotTemplateSave   = (template) => api.put('/hotspot/template', { template }).then((r) => r.data);
-export const apiHotspotTemplateReset  = () => api.delete('/hotspot/template').then((r) => r.data);
+export const apiHotspotTemplate         = () => api.get('/hotspot/template').then((r) => r.data);
+export const apiHotspotTemplateSave     = (template) => api.put('/hotspot/template', { template }).then((r) => r.data);
+export const apiHotspotTemplateReset    = () => api.delete('/hotspot/template').then((r) => r.data);
+export const apiHotspotVisualSettings   = () => api.get('/hotspot/template/visual').then((r) => r.data.settings);
+export const apiHotspotVisualSave       = (s) => api.put('/hotspot/template/visual', s).then((r) => r.data);
+export const apiHotspotGenerate         = (opts) => api.post('/hotspot/template/generate', opts).then((r) => r.data.html);
+export const apiHotspotLogoUpload       = (file) => {
+  const fd = new FormData();
+  fd.append('logo', file);
+  return api.post('/hotspot/template/logo', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data);
+};

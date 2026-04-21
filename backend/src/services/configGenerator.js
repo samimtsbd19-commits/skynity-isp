@@ -271,20 +271,32 @@ export async function generatePortalHtml(opts = {}) {
        FROM packages WHERE is_active = 1 ORDER BY sort_order, id`
   );
 
-  const brand = opts.brand
-    || (await settings.getSetting('site.name'))
-    || config.APP_NAME
-    || 'Skynity ISP';
-
-  const color = (await settings.getSetting('branding.primary_color')) || '#f59e0b';
+  const brand        = opts.siteName      || (await settings.getSetting('site.name'))             || config.APP_NAME || 'Skynity ISP';
+  const tagline      = opts.tagline       || (await settings.getSetting('portal.tagline'))        || 'Choose a package below, or log in if you already have an account.';
+  const color        = opts.primaryColor  || (await settings.getSetting('branding.primary_color'))|| '#f59e0b';
+  const bgColor      = opts.bgColor       || (await settings.getSetting('portal.bg_color'))       || '#0b0b0d';
+  const cardBg       = opts.cardBg        || (await settings.getSetting('portal.card_bg'))        || '#16161a';
+  const textColor    = opts.textColor     || (await settings.getSetting('portal.text_color'))     || '#e7e7e9';
+  const fontSize     = Number(opts.fontSize || (await settings.getSetting('portal.font_size'))    || 14);
+  const fontFamily   = opts.fontFamily    || (await settings.getSetting('portal.font_family'))    || 'system-ui,-apple-system,"Segoe UI",Roboto,sans-serif';
+  const logoUrl      = opts.logoUrl       || (await settings.getSetting('branding.logo_url'))     || '';
+  const logoPos      = opts.logoPosition  || (await settings.getSetting('portal.logo_position'))  || 'center';
+  const loginTitle   = opts.loginTitle    || (await settings.getSetting('portal.login_title'))    || 'Already have an account? Log in';
+  const supportPhone = opts.supportPhone  || (await settings.getSetting('site.support_phone'))    || '';
+  const currencySym  = opts.currencySymbol|| (await settings.getSetting('site.currency_symbol'))  || '৳';
+  const borderRadius = opts.borderRadius  || (await settings.getSetting('portal.border_radius'))  || '12';
+  const darkMode     = opts.darkMode !== undefined ? opts.darkMode : ((await settings.getSetting('portal.dark_mode')) !== 'false');
 
   const vpsHost = opts.vpsHost
     || (await settings.getSetting('site.public_base_url'))?.replace(/^https?:\/\//, '').replace(/\/$/, '')
     || 'wifi.skynity.org';
   const portalUrl = `https://${vpsHost}/portal`;
 
-  const supportPhone = (await settings.getSetting('site.support_phone')) || '';
-  const currencySym = (await settings.getSetting('site.currency_symbol')) || '৳';
+  const logoHtml = logoUrl
+    ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(brand)}" style="max-height:64px;max-width:180px;object-fit:contain;margin-bottom:12px;display:block;${logoPos === 'center' ? 'margin-left:auto;margin-right:auto;' : logoPos === 'right' ? 'margin-left:auto;' : ''}" />`
+    : '';
+
+  const headerAlign = logoPos === 'right' ? 'right' : logoPos === 'left' ? 'left' : 'center';
 
   const pkgCards = pkgs.map((p) => {
     const price = Number(p.price).toFixed(0);
@@ -301,6 +313,11 @@ export async function generatePortalHtml(opts = {}) {
       </a>`;
   }).join('\n');
 
+  const mutedColor  = darkMode ? '#78787e' : '#6b7280';
+  const inputBg     = darkMode ? '#0e0e11' : '#f9fafb';
+  const inputBorder = darkMode ? '#2a2a30' : '#d1d5db';
+  const cardBorder  = darkMode ? '#2a2a30' : '#e5e7eb';
+
   return `<!doctype html>
 <html lang="bn">
 <head>
@@ -310,58 +327,61 @@ export async function generatePortalHtml(opts = {}) {
   <title>${escapeHtml(brand)} — WiFi Login</title>
   <style>
     *{box-sizing:border-box}
-    body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#0b0b0d;color:#e7e7e9;min-height:100vh}
-    .wrap{max-width:1000px;margin:0 auto;padding:24px 16px 80px}
-    header{text-align:center;padding:32px 0 24px}
-    header h1{margin:0 0 4px;font-size:34px;letter-spacing:-0.02em}
+    body{margin:0;font-family:${fontFamily};font-size:${fontSize}px;background:${bgColor};color:${textColor};min-height:100vh}
+    .wrap{max-width:960px;margin:0 auto;padding:24px 16px 80px}
+    header{text-align:${headerAlign};padding:32px 0 24px}
+    header h1{margin:0 0 6px;font-size:${Math.round(fontSize * 2.2)}px;letter-spacing:-0.02em;line-height:1.1}
     header h1 em{color:${color};font-style:italic}
-    header p{margin:0;color:#a0a0a6;font-size:14px}
-    .login-box{background:#16161a;border:1px solid #2a2a30;border-radius:12px;padding:20px;margin-bottom:32px}
-    .login-box h2{margin:0 0 12px;font-size:16px;color:#cfcfd4}
+    header p{margin:0;color:${mutedColor};font-size:${fontSize - 1}px}
+    .login-box{background:${cardBg};border:1px solid ${cardBorder};border-radius:${borderRadius}px;padding:20px;margin-bottom:32px}
+    .login-box h2{margin:0 0 12px;font-size:${fontSize + 2}px;color:${textColor}}
     .login-box form{display:flex;gap:8px;flex-wrap:wrap}
-    .login-box input{flex:1;min-width:140px;padding:10px 12px;background:#0e0e11;border:1px solid #2a2a30;color:#e7e7e9;border-radius:6px;font-size:14px}
-    .login-box button{padding:10px 18px;background:${color};color:#0b0b0d;border:0;border-radius:6px;font-weight:600;cursor:pointer}
-    .login-box .hint{font-size:12px;color:#78787e;margin-top:8px}
+    .login-box input{flex:1;min-width:130px;padding:10px 12px;background:${inputBg};border:1px solid ${inputBorder};color:${textColor};border-radius:${Math.round(Number(borderRadius) * 0.5)}px;font-size:${fontSize}px;outline:none}
+    .login-box input:focus{border-color:${color}}
+    .login-box button{padding:10px 20px;background:${color};color:#0b0b0d;border:0;border-radius:${Math.round(Number(borderRadius) * 0.5)}px;font-weight:700;font-size:${fontSize}px;cursor:pointer;letter-spacing:.02em}
+    .login-box button:hover{opacity:.9}
+    .hint{font-size:${fontSize - 2}px;color:${mutedColor};margin-top:8px}
     .section-title{display:flex;align-items:baseline;justify-content:space-between;margin:24px 0 14px}
-    .section-title h2{margin:0;font-size:20px;letter-spacing:-0.01em}
+    .section-title h2{margin:0;font-size:${fontSize + 6}px;letter-spacing:-0.01em}
     .section-title h2 em{color:${color};font-style:italic}
-    .section-title small{color:#78787e;font-size:12px}
-    .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
-    .pkg{display:block;background:#16161a;border:1px solid #2a2a30;border-radius:10px;padding:16px;color:inherit;text-decoration:none;transition:border-color .15s,transform .15s}
-    .pkg:hover{border-color:${color};transform:translateY(-2px)}
+    .section-title small{color:${mutedColor};font-size:${fontSize - 2}px}
+    .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+    .pkg{display:block;background:${cardBg};border:1px solid ${cardBorder};border-radius:${borderRadius}px;padding:16px;color:inherit;text-decoration:none;transition:border-color .15s,transform .15s,box-shadow .15s}
+    .pkg:hover{border-color:${color};transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.15)}
     .pkg-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-    .pkg-type{display:inline-block;font-size:10px;letter-spacing:.12em;text-transform:uppercase;padding:3px 6px;border-radius:3px;background:#0e0e11;border:1px solid #2a2a30}
+    .pkg-type{display:inline-block;font-size:${fontSize - 4}px;letter-spacing:.12em;text-transform:uppercase;padding:3px 6px;border-radius:4px;background:${inputBg};border:1px solid ${cardBorder}}
     .pkg-type.pppoe{color:#6ec9ff}
     .pkg-type.hotspot{color:${color}}
-    .pkg-price{font-size:18px;font-weight:700;color:${color}}
-    .pkg-name{font-weight:600;font-size:15px;margin-bottom:4px}
-    .pkg-speed{font-size:12px;color:#9a9aa0;margin-bottom:6px}
-    .pkg-desc{font-size:12px;color:#78787e;margin-bottom:10px}
-    .pkg-buy{font-size:12px;color:${color};font-weight:600;margin-top:10px}
-    footer{text-align:center;margin-top:40px;color:#5a5a60;font-size:12px}
+    .pkg-price{font-size:${fontSize + 4}px;font-weight:700;color:${color}}
+    .pkg-name{font-weight:600;font-size:${fontSize + 1}px;margin-bottom:4px}
+    .pkg-speed{font-size:${fontSize - 2}px;color:${mutedColor};margin-bottom:6px}
+    .pkg-desc{font-size:${fontSize - 2}px;color:${mutedColor};margin-bottom:10px}
+    .pkg-buy{font-size:${fontSize - 2}px;color:${color};font-weight:600;margin-top:10px}
+    .action-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-top:24px}
+    footer{text-align:center;margin-top:40px;color:${mutedColor};font-size:${fontSize - 2}px}
     footer a{color:${color};text-decoration:none}
-    @media (max-width:480px){header h1{font-size:26px}}
+    @media(max-width:480px){header h1{font-size:${Math.round(fontSize * 1.7)}px}.grid{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
   <div class="wrap">
     <header>
+      ${logoHtml}
       <h1>${escapeHtml(brand)} <em>WiFi</em></h1>
-      <p>Choose a package below, or log in if you already have an account.</p>
+      <p>${escapeHtml(tagline)}</p>
     </header>
 
-    <!-- Classic MikroTik login (for users with existing username/password) -->
     <div class="login-box">
-      <h2>Already have an account? Log in</h2>
+      <h2>${escapeHtml(loginTitle)}</h2>
       <form name="login" action="$(link-login-only)" method="post"
             $(if chap-id) onsubmit="return doLogin()" $(endif)>
         <input type="hidden" name="dst" value="$(link-orig)" />
         <input type="hidden" name="popup" value="true" />
-        <input type="text"  name="username" placeholder="username" autocomplete="username" required />
-        <input type="password" name="password" placeholder="password" autocomplete="current-password" required />
+        <input type="text"     name="username" placeholder="Username" autocomplete="username" required />
+        <input type="password" name="password" placeholder="Password" autocomplete="current-password" required />
         <button type="submit">Log in</button>
       </form>
-      $(if error)<div class="hint" style="color:#ff6b6b">$(error)</div>$(endif)
+      $(if error)<div class="hint" style="color:#ef4444">$(error)</div>$(endif)
       <div class="hint">Your MAC: <code>$(mac)</code> · IP: <code>$(ip)</code></div>
     </div>
 
@@ -371,15 +391,15 @@ export async function generatePortalHtml(opts = {}) {
     </div>
 
     <div class="grid">
-      ${pkgCards || '<div style="grid-column:1/-1;color:#78787e;text-align:center;padding:40px">No packages available yet. Please contact admin.</div>'}
+      ${pkgCards || `<div style="grid-column:1/-1;color:${mutedColor};text-align:center;padding:40px">No packages available yet. Please contact admin.</div>`}
     </div>
 
-    <div style="display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-top:24px">
+    <div class="action-grid">
       <a class="pkg" href="${portalUrl}/redeem" target="_blank" rel="noopener" style="text-align:center">
-        <div class="pkg-buy" style="font-size:14px;margin:0">🎟 Have a voucher? Redeem</div>
+        <div class="pkg-buy" style="font-size:${fontSize}px;margin:0">🎟 Have a voucher? Redeem</div>
       </a>
       <a class="pkg" href="${portalUrl}/login" target="_blank" rel="noopener" style="text-align:center">
-        <div class="pkg-buy" style="font-size:14px;margin:0">↻ Returning customer login</div>
+        <div class="pkg-buy" style="font-size:${fontSize}px;margin:0">↻ Returning customer login</div>
       </a>
     </div>
 
@@ -395,7 +415,6 @@ export async function generatePortalHtml(opts = {}) {
       document.login.password.value = hexMD5('$(chap-id)' + document.login.password.value + '$(chap-challenge)');
       return true;
     }
-    /* minimal MD5 for CHAP. Kept tiny on purpose. */
     function hexMD5(s){return window.md5?window.md5(s):s;}
   </script>
   $(endif)
