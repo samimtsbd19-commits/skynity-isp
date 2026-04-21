@@ -32,6 +32,7 @@ import PublicPortal from './pages/PublicPortal';
 import Hotspot from './pages/Hotspot';
 import HotspotTemplate from './pages/HotspotTemplate';
 import ProjectGuide from './pages/ProjectGuide';
+import Diagnostics from './pages/Diagnostics';
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -96,6 +97,7 @@ export default function App() {
               <Route path="activity" element={<Activity />} />
               <Route path="settings" element={<Settings />} />
               <Route path="guide" element={<ProjectGuide />} />
+              <Route path="diagnostics" element={<Diagnostics />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

@@ -404,6 +404,14 @@ export const apiHotspotGenerate         = (opts) => api.post('/hotspot/template/
 export const apiGuideGet   = () => api.get('/guide').then((r) => r.data);
 export const apiGuideSave  = (markdown) => api.put('/guide', { markdown }).then((r) => r.data);
 
+// ── Diagnostics ─────────────────────────────────────────────
+export const apiDiagStatus         = () => api.get('/diagnostics/status').then((r) => r.data);
+export const apiDiagTelegramTest   = (token) => api.post('/diagnostics/telegram/test', { token }).then((r) => r.data);
+export const apiDiagTelegramRestart= () => api.post('/diagnostics/telegram/restart').then((r) => r.data);
+export const apiDiagAiTest         = () => api.post('/diagnostics/ai/test').then((r) => r.data);
+export const apiDiagMikrotikTest   = (rid) => api.post(`/diagnostics/mikrotik/test${rid ? '/' + rid : ''}`).then((r) => r.data);
+export const apiDiagMikrotikLive   = (rid) => api.get(`/diagnostics/mikrotik/live${rid ? '/' + rid : ''}`).then((r) => r.data);
+
 export const apiHotspotLogoUpload       = (file) => {
   const fd = new FormData();
   fd.append('logo', file);

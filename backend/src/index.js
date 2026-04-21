@@ -117,7 +117,7 @@ async function main() {
 
   // start Telegram bot
   try {
-    startBot();
+    await startBot();
   } catch (err) {
     logger.error({ err }, 'failed to start telegram bot');
   }

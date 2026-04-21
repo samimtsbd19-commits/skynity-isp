@@ -13,6 +13,7 @@ import path from 'node:path';
 import config from '../config/index.js';
 import db from '../database/pool.js';
 import logger from '../utils/logger.js';
+import { getSetting } from '../services/settings.js';
 import {
   approveOrderAndProvision,
   rejectOrder,
@@ -26,21 +27,78 @@ import {
   registerSettingShortcut,
 } from './claude-commands.js';
 
-const { TELEGRAM_BOT_TOKEN, TELEGRAM_ADMIN_IDS, BKASH_NUMBER, NAGAD_NUMBER, CURRENCY_SYMBOL, UPLOAD_DIR } = config;
+const { BKASH_NUMBER, NAGAD_NUMBER, CURRENCY_SYMBOL, UPLOAD_DIR } = config;
 
-// If TELEGRAM_BOT_TOKEN is missing, return a no-op proxy so module-level
-// handler registrations (bot.onText / bot.on / ...) don't crash the process.
-// Polling only actually starts in startBot() below.
-function createNullBot() {
-  const noop = async () => null;
-  return new Proxy({}, {
-    get() { return noop; },
-  });
+// These resolve at startBot() time — DB first, env fallback. See resolveCreds().
+let TELEGRAM_BOT_TOKEN = config.TELEGRAM_BOT_TOKEN || null;
+let TELEGRAM_ADMIN_IDS = config.TELEGRAM_ADMIN_IDS || [];
+
+async function resolveCreds() {
+  try {
+    const dbToken  = await getSetting('telegram.bot_token');
+    const dbAdmins = await getSetting('telegram.admin_ids');
+    const dbEnabled = await getSetting('telegram.bot_enabled');
+    if (dbEnabled === 'false' || dbEnabled === false) {
+      TELEGRAM_BOT_TOKEN = null;
+      return;
+    }
+    if (dbToken && String(dbToken).trim().length > 10) {
+      TELEGRAM_BOT_TOKEN = String(dbToken).trim();
+    } else if (config.TELEGRAM_BOT_TOKEN) {
+      TELEGRAM_BOT_TOKEN = config.TELEGRAM_BOT_TOKEN;
+    } else {
+      TELEGRAM_BOT_TOKEN = null;
+    }
+    if (dbAdmins && String(dbAdmins).trim()) {
+      TELEGRAM_ADMIN_IDS = String(dbAdmins).split(',').map((s) => s.trim()).filter(Boolean);
+    }
+  } catch (err) {
+    logger.warn({ err: err.message }, 'resolveCreds fell back to env');
+  }
 }
 
-const bot = TELEGRAM_BOT_TOKEN
-  ? new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false })
-  : createNullBot();
+// ─────────────────────────────────────────────────────────────
+// Hot-swap Telegram bot wrapper.
+//
+// Handler registrations (bot.onText / bot.on) happen at module
+// load time — BEFORE we know the token (which comes from DB).
+// We track every registration in _handlers[] and re-apply them
+// whenever the inner bot is created or replaced.
+// This lets us restart the bot with a new token via the API
+// without restarting the whole backend.
+// ─────────────────────────────────────────────────────────────
+let _inner = null;
+const _handlers = [];  // [{ method: 'on'|'onText'|'removeTextListener', args: [...] }]
+
+const bot = new Proxy({}, {
+  get(_t, prop) {
+    if (prop === 'on' || prop === 'onText') {
+      return (...args) => {
+        _handlers.push({ method: prop, args });
+        if (_inner) _inner[prop](...args);
+      };
+    }
+    if (!_inner) {
+      // No bot yet — methods return a resolved promise so callers don't crash.
+      return () => Promise.resolve();
+    }
+    const val = _inner[prop];
+    return typeof val === 'function' ? val.bind(_inner) : val;
+  },
+});
+
+async function createInnerBot(token) {
+  if (_inner) {
+    try { await _inner.stopPolling(); } catch { /* ignore */ }
+    _inner = null;
+  }
+  if (!token) return null;
+  _inner = new TelegramBot(token, { polling: false });
+  for (const h of _handlers) {
+    try { _inner[h.method](...h.args); } catch (err) { logger.warn({ err: err.message, method: h.method }, 're-register handler failed'); }
+  }
+  return _inner;
+}
 
 const isAdmin = (tgId) => TELEGRAM_ADMIN_IDS.includes(String(tgId));
 
@@ -555,28 +613,70 @@ bot.onText(/^\/stats$/, async (msg) => {
 // ============================================================
 // Startup
 // ============================================================
-export function startBot() {
-  if (!TELEGRAM_BOT_TOKEN) {
-    logger.warn('TELEGRAM_BOT_TOKEN not set — Telegram bot disabled. Set it and restart to enable.');
-    return null;
-  }
+let _handlersRegistered = false;
 
-  attachBot(bot);
-
-  // Register all admin commands
+function registerAllHandlers() {
+  if (_handlersRegistered) return;
+  _handlersRegistered = true;
   registerAdminCommands(bot, { isAdmin, setSession, getSession, clearSession, CURRENCY_SYMBOL });
   registerClaudeAi(bot, { isAdmin, setSession, clearSession });
   registerSettingShortcut(bot, { isAdmin });
-
   bot.on('polling_error', (err) => logger.error({ err: err.message }, 'polling error'));
+}
 
-  // Start polling now that all handlers are registered.
-  bot.startPolling().then(
-    () => logger.info({ admins: TELEGRAM_ADMIN_IDS.length }, 'Telegram bot started'),
-    (err) => logger.error({ err: err.message }, 'failed to start telegram polling')
-  );
+export async function startBot() {
+  await resolveCreds();
+  if (!TELEGRAM_BOT_TOKEN) {
+    logger.warn('no telegram token (neither DB settings nor env) — bot disabled');
+    return null;
+  }
+  await createInnerBot(TELEGRAM_BOT_TOKEN);
+  attachBot(bot);
+  registerAllHandlers();
 
+  try {
+    await _inner.startPolling();
+    logger.info({ admins: TELEGRAM_ADMIN_IDS.length }, 'Telegram bot started');
+  } catch (err) {
+    logger.error({ err: err.message }, 'failed to start telegram polling');
+  }
   return bot;
+}
+
+/** Re-read DB settings + swap bot without restarting backend. */
+export async function restartBot() {
+  const prevHad = !!_inner;
+  try {
+    if (_inner) { try { await _inner.stopPolling(); } catch { /* ignore */ } }
+  } catch { /* ignore */ }
+  _inner = null;
+  await resolveCreds();
+  if (!TELEGRAM_BOT_TOKEN) {
+    logger.warn('restartBot: no token — bot stopped');
+    return { ok: true, running: false, message: 'Token empty — bot stopped' };
+  }
+  await createInnerBot(TELEGRAM_BOT_TOKEN);
+  try {
+    await _inner.startPolling();
+    logger.info({ wasRunning: prevHad, admins: TELEGRAM_ADMIN_IDS.length }, 'Telegram bot restarted');
+    return { ok: true, running: true, adminCount: TELEGRAM_ADMIN_IDS.length };
+  } catch (err) {
+    logger.error({ err: err.message }, 'restartBot polling failed');
+    return { ok: false, error: err.message };
+  }
+}
+
+/** Verify token by calling getMe (doesn't need polling). */
+export async function testBotConnection(token) {
+  const useToken = token || TELEGRAM_BOT_TOKEN;
+  if (!useToken) return { ok: false, error: 'no token provided' };
+  try {
+    const tmp = new TelegramBot(useToken, { polling: false });
+    const me = await tmp.getMe();
+    return { ok: true, bot: { id: me.id, username: me.username, first_name: me.first_name } };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 }
 
 /**
@@ -602,6 +702,15 @@ export async function sendTelegramTo(chatId, text, opts = {}) {
     logger.warn({ err: err.message, chatId }, 'sendTelegramTo failed');
     return { ok: false, error: err.message };
   }
+}
+
+/** Current runtime status for Diagnostics page. */
+export function telegramStatus() {
+  return {
+    running: !!_inner,
+    hasToken: !!TELEGRAM_BOT_TOKEN,
+    adminCount: Array.isArray(TELEGRAM_ADMIN_IDS) ? TELEGRAM_ADMIN_IDS.length : 0,
+  };
 }
 
 /** Expose the boolean for settings/status endpoints. */
