@@ -144,8 +144,9 @@ export default function Security() {
         </section>
 
         <p className="text-xs text-text-mute">
-          Claude AI (Telegram): set <code className="font-mono">ai.claude.enabled</code>,{' '}
-          <code className="font-mono">ai.claude.api_key</code> in System Settings — see docs/CLAUDE_TELEGRAM.md
+          Telegram AI: <code className="font-mono">ai.claude.enabled</code> + either{' '}
+          <code className="font-mono">ai.openrouter.*</code> or <code className="font-mono">ai.claude.api_key</code>{' '}
+          — see docs/CLAUDE_TELEGRAM.md
         </p>
       </div>
     </div>

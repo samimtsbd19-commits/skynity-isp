@@ -50,7 +50,7 @@ docker compose up -d --build
 
 After startup visit **`https://YOUR_DOMAIN/`** (first login: `admin` / `admin123` — change immediately).
 
-Full guide: [`docs/DEPLOY.md`](docs/DEPLOY.md) · WireGuard: [`docs/WIREGUARD.md`](docs/WIREGUARD.md) · Bot reference: [`docs/ADMIN_COMMANDS.md`](docs/ADMIN_COMMANDS.md)
+Full guide: [`docs/DEPLOY.md`](docs/DEPLOY.md) · WireGuard: [`docs/WIREGUARD.md`](docs/WIREGUARD.md) · Bot reference: [`docs/ADMIN_COMMANDS.md`](docs/ADMIN_COMMANDS.md) · **Stack review:** [`docs/PROJECT_REVIEW.md`](docs/PROJECT_REVIEW.md)
 
 ## 🏗️ Stack
 
@@ -78,6 +78,7 @@ skynity-isp/
     ├── HOSTINGER_DEPLOY.md      # ← Hostinger VPS Docker Manager
     ├── COOLIFY_DEPLOY.md        # ← Multi-project deploy via Coolify
     ├── DEPLOY.md
+    ├── PROJECT_REVIEW.md        # ← Full stack / features snapshot (operators)
     ├── WIREGUARD.md
     └── ADMIN_COMMANDS.md
 ```
@@ -90,8 +91,8 @@ skynity-isp/
 | 2 | Admin commands, WireGuard, HTTP API, multi-router | ✅ Complete |
 | 3 | Web dashboard (React + Tailwind) | ✅ Complete |
 | 4 | Config/VPN/Scripts/Updates + multi-admin + system settings | ✅ Complete |
-| 5 | Real-time graphs (bandwidth, ping, SFP, neighbors) | 🔜 Next |
-| 6 | bKash Checkout API, SMS alerts, resellers, invoice PDF | Planned |
+| 5 | Monitoring suite, bandwidth dashboards, security audit, AI (Anthropic/OpenRouter) | ✅ In codebase |
+| 6 | Deeper payment APIs, reseller billing, extra hardening | Optional / roadmap |
 
 ## 📜 License
 

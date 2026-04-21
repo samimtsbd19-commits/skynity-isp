@@ -1,10 +1,21 @@
-# Claude AI in Telegram
+# AI assistant in Telegram (Anthropic or OpenRouter)
 
-## Important: API vs claude.ai Pro
+## Option A — OpenRouter (one key, many models)
 
-- **claude.ai “Pro” (web chat)** and **Anthropic API** are billed separately.
-- To use the bot you need an **API key** from [Anthropic Console](https://console.anthropic.com/) (Usage → API keys).
-- Put the key in **System Settings** as `ai.claude.api_key` (secret) and set `ai.claude.enabled` = `true`.
+1. Create a key at [openrouter.ai/keys](https://openrouter.ai/keys) (`sk-or-v1-…`).
+2. In **System Settings**:
+   - `ai.claude.enabled` = `true`
+   - `ai.openrouter.enabled` = `true`
+   - `ai.openrouter.api_key` = your OpenRouter key (secret)
+   - Optional: `ai.openrouter.default_model` (e.g. `anthropic/claude-3.5-sonnet`, `openai/gpt-4o`)
+   - Optional: `ai.openrouter.site_url` — sent as `HTTP-Referer` to OpenRouter (or use `site.public_base_url`)
+
+When OpenRouter is enabled, `/ai` and `/models` use **OpenRouter** model IDs; Telegram buttons use short `aim:N` callbacks (fits Telegram’s 64-byte limit).
+
+## Option B — Anthropic direct
+
+- **claude.ai “Pro” (web)** and **Anthropic API** are billed separately.
+- Get a key from [Anthropic Console](https://console.anthropic.com/) and set `ai.claude.api_key`. Leave **`ai.openrouter.enabled` = false** so traffic goes to Anthropic’s API only.
 
 ## Telegram commands (admins only)
 
