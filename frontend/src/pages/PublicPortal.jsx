@@ -29,41 +29,86 @@ function Layout({ children, branding, support }) {
   const t = useT();
   return (
     <div style={{
-      minHeight: '100vh', background: '#0b0b0d', color: '#e7e7e9',
-      fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+      minHeight: '100vh',
+      background: '#0a0a0b',
+      color: '#e7e7e9',
+      fontFamily: '"Geist", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+      backgroundImage: `
+        radial-gradient(circle at 12% 0%, ${color}14 0%, transparent 45%),
+        radial-gradient(circle at 88% 100%, rgba(6,182,212,0.06) 0%, transparent 45%)
+      `,
+      backgroundAttachment: 'fixed',
     }}>
       <style>{`
         *{box-sizing:border-box}
-        a{color:${color};text-decoration:none}
+        a{color:${color};text-decoration:none;transition:opacity .15s}
+        a:hover{opacity:.8}
         input,select,textarea{
-          width:100%;padding:10px 12px;background:#0e0e11;border:1px solid #2a2a30;
-          color:#e7e7e9;border-radius:6px;font-size:14px;font-family:inherit
+          width:100%;padding:12px 14px;background:#101014;border:1px solid #26262b;
+          color:#e7e7e9;border-radius:10px;font-size:15px;font-family:inherit;
+          transition:border-color .15s, box-shadow .15s
         }
-        input:focus,select:focus,textarea:focus{outline:none;border-color:${color}}
+        input:focus,select:focus,textarea:focus{
+          outline:none;border-color:${color};box-shadow:0 0 0 3px ${color}22
+        }
         .btn{
-          display:inline-flex;align-items:center;justify-content:center;gap:6px;
-          padding:10px 18px;background:${color};color:#0b0b0d;border:0;border-radius:6px;
-          font-weight:600;cursor:pointer;font-size:14px;font-family:inherit
+          display:inline-flex;align-items:center;justify-content:center;gap:8px;
+          padding:13px 22px;background:${color};color:#0b0b0d;border:0;border-radius:10px;
+          font-weight:600;cursor:pointer;font-size:15px;font-family:inherit;
+          letter-spacing:.01em;transition:transform .15s, box-shadow .15s, opacity .15s;
+          box-shadow:0 4px 14px ${color}33
         }
+        .btn:hover:not([disabled]){transform:translateY(-1px);box-shadow:0 8px 20px ${color}55}
         .btn[disabled]{opacity:.5;cursor:wait}
-        .btn-ghost{background:transparent;color:#e7e7e9;border:1px solid #2a2a30}
-        .card{background:#16161a;border:1px solid #2a2a30;border-radius:12px;padding:20px}
-        .muted{color:#78787e;font-size:12px}
-        .kicker{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:${color}}
-        .label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#78787e;margin-bottom:6px;display:block}
-        .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
-        .pkg{padding:16px;background:#16161a;border:1px solid #2a2a30;border-radius:10px;cursor:pointer;transition:.15s}
-        .pkg:hover{border-color:${color};transform:translateY(-2px)}
-        .pkg.sel{border-color:${color};box-shadow:0 0 0 1px ${color}}
-        .tag{display:inline-block;padding:2px 6px;border-radius:3px;border:1px solid #2a2a30;font-size:10px;letter-spacing:.12em;text-transform:uppercase;background:#0e0e11}
-        .tag-pppoe{color:#6ec9ff}
-        .tag-hotspot{color:${color}}
-        .step-dots{display:flex;gap:8px;margin:16px 0 24px}
-        .step-dots span{width:24px;height:4px;background:#2a2a30;border-radius:2px}
-        .step-dots span.on{background:${color}}
-        .err{color:#ff6b6b;font-size:12px;margin-top:8px}
+        .btn-ghost{background:transparent;color:#e7e7e9;border:1px solid #2a2a30;box-shadow:none}
+        .btn-ghost:hover:not([disabled]){border-color:${color};background:${color}08;box-shadow:none}
+        .btn-lg{padding:16px 26px;font-size:16px;border-radius:12px}
+        .card{
+          background:linear-gradient(180deg,#131317 0%,#0e0e12 100%);
+          border:1px solid #26262b;border-radius:16px;padding:22px;
+          box-shadow:inset 0 1px 0 0 rgba(255,255,255,.025)
+        }
+        .muted{color:#78787e;font-size:13px;line-height:1.55}
+        .kicker{font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:${color};font-weight:500}
+        .label{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#78787e;margin-bottom:8px;display:block;font-weight:500}
+        .display{font-family:"Instrument Serif",serif;font-weight:400;letter-spacing:-.015em;line-height:1.05}
+        .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+        .pkg{
+          padding:20px;background:linear-gradient(180deg,#15151a 0%,#101014 100%);
+          border:1px solid #26262b;border-radius:14px;cursor:pointer;
+          transition:transform .18s, border-color .18s, box-shadow .18s;
+          position:relative;overflow:hidden
+        }
+        .pkg::before{
+          content:'';position:absolute;inset:0;border-radius:14px;padding:1px;
+          background:linear-gradient(135deg,${color}66,transparent 40%,transparent 60%,${color}22);
+          -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+          -webkit-mask-composite:xor;mask-composite:exclude;
+          opacity:0;transition:opacity .2s;pointer-events:none
+        }
+        .pkg:hover{transform:translateY(-3px);border-color:${color}55;box-shadow:0 12px 32px rgba(0,0,0,.3)}
+        .pkg:hover::before{opacity:1}
+        .pkg.sel{border-color:${color};box-shadow:0 0 0 2px ${color}33, 0 8px 24px ${color}22}
+        .tag{display:inline-block;padding:3px 8px;border-radius:999px;border:1px solid #2a2a30;font-size:10px;letter-spacing:.14em;text-transform:uppercase;background:#0e0e11;font-weight:600}
+        .tag-pppoe{color:#6ec9ff;border-color:#6ec9ff44}
+        .tag-hotspot{color:${color};border-color:${color}44}
+        .step-dots{display:flex;gap:8px;margin:20px 0 28px;align-items:center;justify-content:center}
+        .step-dots span{width:32px;height:4px;background:#2a2a30;border-radius:2px;transition:background .2s, width .2s}
+        .step-dots span.on{background:${color};width:40px}
+        .step-dots span.done{background:${color}88}
+        .err{color:#ff6b6b;font-size:13px;margin-top:8px;padding:10px 12px;background:#ff6b6b10;border:1px solid #ff6b6b33;border-radius:8px}
+        .hero-badge{
+          display:inline-flex;align-items:center;gap:8px;padding:6px 14px;
+          border:1px solid ${color}44;border-radius:999px;background:${color}0d;
+          font-size:12px;letter-spacing:.05em;color:${color};font-weight:500;margin-bottom:20px
+        }
+        .cta-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:28px}
+        @media(max-width:480px){
+          .cta-row{flex-direction:column}
+          .cta-row .btn{width:100%}
+        }
       `}</style>
-      <div style={{ maxWidth: 900, margin: '0 auto', padding: '24px 16px 80px' }}>
+      <div style={{ maxWidth: 960, margin: '0 auto', padding: '20px 16px 80px' }}>
         {/* Language switcher — top-right corner, always accessible */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: -16 }}>
           <select
@@ -81,14 +126,21 @@ function Layout({ children, branding, support }) {
             ))}
           </select>
         </div>
-        <header style={{ textAlign: 'center', padding: '24px 0' }}>
+        <header style={{ textAlign: 'center', padding: '28px 0 20px' }}>
           {branding?.logo_url
-            ? <img src={branding.logo_url} alt={name} style={{ height: 48, marginBottom: 8 }} />
-            : null}
-          <h1 style={{ margin: 0, fontSize: 28, letterSpacing: '-.02em' }}>
-            {name} <em style={{ color }}>{lang === 'bn' ? 'পোর্টাল' : 'portal'}</em>
-          </h1>
-          <p className="muted" style={{ margin: '6px 0 0' }}>{t('portal.tagline')}</p>
+            ? <img src={branding.logo_url} alt={name} style={{ height: 44, marginBottom: 12 }} />
+            : (
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 8,
+                fontSize: 13, letterSpacing: '.2em', textTransform: 'uppercase', color: '#78787e',
+              }}>
+                <span style={{
+                  width: 8, height: 8, borderRadius: 999, background: color,
+                  boxShadow: `0 0 12px ${color}`,
+                }} />
+                {name}
+              </div>
+            )}
         </header>
         {children}
         <PortalFooter branding={branding} support={support} />
@@ -293,33 +345,42 @@ function Landing() {
         </div>
       )}
 
-      {/* Build-your-own custom package — tappable banner that jumps to /build */}
-      <button
-        onClick={() => nav('/portal/build')}
-        style={{
-          width: '100%', marginBottom: 20, padding: 16,
-          background: `linear-gradient(135deg, ${color}22, ${color}05)`,
-          border: `1px solid ${color}66`, borderRadius: 12,
-          color: 'inherit', font: 'inherit', cursor: 'pointer',
-          textAlign: 'left', display: 'flex', alignItems: 'center', gap: 14,
-        }}
-      >
-        <div style={{
-          width: 40, height: 40, borderRadius: 10, background: color,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: '#0b0b0d', fontSize: 20, fontWeight: 700,
-        }}>⚡</div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700, fontSize: 15 }}>Build your own package</div>
-          <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
-            Pick devices, speed, and duration — see price instantly.
-          </div>
+      {/* ─── HERO ─── Big gradient statement + CTA pair ─── */}
+      <section style={{ textAlign: 'center', padding: '32px 0 40px', position: 'relative' }}>
+        <div className="hero-badge">
+          <span style={{ width: 6, height: 6, borderRadius: 999, background: color, boxShadow: `0 0 8px ${color}` }} />
+          Powered by Starlink · Low-latency satellite
         </div>
-        <div style={{ color, fontSize: 20 }}>→</div>
-      </button>
+        <h1 className="display" style={{
+          margin: 0, fontSize: 'clamp(36px, 8vw, 64px)',
+          background: `linear-gradient(135deg, #ffffff 0%, ${color} 100%)`,
+          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+          backgroundClip: 'text',
+        }}>
+          Fast internet,<br />
+          <em style={{ fontStyle: 'italic' }}>on demand.</em>
+        </h1>
+        <p style={{
+          marginTop: 18, color: '#94a3b8', fontSize: 15, lineHeight: 1.6,
+          maxWidth: 520, margin: '18px auto 0',
+        }}>
+          Buy WiFi access in minutes — pick from ready plans or build your own with
+          exactly the speed, duration, and device count you need.
+        </p>
+        <div className="cta-row" style={{ justifyContent: 'center' }}>
+          <button onClick={() => nav('/portal/build')} className="btn btn-lg">
+            ⚡ Build your plan &rarr;
+          </button>
+          <a href="#plans" className="btn btn-ghost btn-lg">Browse presets</a>
+        </div>
+      </section>
 
-      <div className="kicker" style={{ textAlign: 'center', marginBottom: 8 }}>Available packages</div>
-      <h2 style={{ margin: '0 0 20px', textAlign: 'center', fontSize: 22 }}>Choose your <em style={{ color }}>plan</em></h2>
+      <div id="plans" className="kicker" style={{ textAlign: 'center', marginBottom: 10 }}>
+        Ready-made packages
+      </div>
+      <h2 className="display" style={{ margin: '0 0 24px', textAlign: 'center', fontSize: 28 }}>
+        Choose your <em style={{ color }}>plan</em>
+      </h2>
 
       {pkgs.length === 0 ? (
         <div className="card" style={{ textAlign: 'center' }}>
@@ -2191,15 +2252,17 @@ export default function PublicPortal() {
 }
 
 // ═════════════════════════════════════════════════════════════
-// Custom Package Builder — user picks devices × speed × duration,
-// sees live price, and submits as a custom order.
+// Custom Package Builder — step-by-step wizard
+//   1. Devices  →  2. Speed  →  3. Duration  →  4. Review & order
+// Shows a progress bar at the top and a sticky price summary.
 // ═════════════════════════════════════════════════════════════
 function CustomBuilder() {
   const info = useBranding();
-  const nav = useNavigate();
-  const [devices, setDevices]   = useState(1);
-  const [speedMbps, setSpeed]   = useState(5);
-  const [days, setDays]         = useState(30);
+  const nav  = useNavigate();
+  const [step, setStep] = useState(1);
+  const [devices, setDevices]   = useState(null);
+  const [speedMbps, setSpeed]   = useState(null);
+  const [days, setDays]         = useState(null);
   const [phone, setPhone]       = useState('');
   const [fullName, setFullName] = useState('');
   const [address, setAddress]   = useState('');
@@ -2207,18 +2270,38 @@ function CustomBuilder() {
   const [err, setErr]           = useState('');
   const [created, setCreated]   = useState(null);
 
-  const sym = info?.currency_symbol || '৳';
+  const sym   = info?.currency_symbol || '৳';
   const color = info?.branding?.primary_color || '#f59e0b';
 
-  const DEVICES_OPTS = [1, 2, 3, 5];
-  const SPEEDS_OPTS  = [3, 5, 10, 15, 20];
-  const DAYS_OPTS    = [1, 5, 10, 15, 30];
+  const DEVICES_OPTS = [
+    { v: 1, label: '1 device',  sub: 'Phone only' },
+    { v: 2, label: '2 devices', sub: 'Phone + laptop' },
+    { v: 3, label: '3 devices', sub: 'Small family' },
+    { v: 5, label: '5 devices', sub: 'Whole household' },
+  ];
+  const SPEEDS_OPTS = [
+    { v: 3,  label: '3 Mbps',  sub: 'Browsing + chat' },
+    { v: 5,  label: '5 Mbps',  sub: 'Standard HD video' },
+    { v: 10, label: '10 Mbps', sub: 'Full HD streaming' },
+    { v: 15, label: '15 Mbps', sub: '4K + work calls' },
+    { v: 20, label: '20 Mbps', sub: 'Heavy usage' },
+  ];
+  const DAYS_OPTS = [
+    { v: 1,  label: '1 day',   sub: 'Quick fix' },
+    { v: 5,  label: '5 days',  sub: 'Short trip' },
+    { v: 10, label: '10 days', sub: 'Popular' },
+    { v: 15, label: '15 days', sub: '-15% off', discount: true },
+    { v: 30, label: '30 days', sub: '-25% off · best value', discount: true },
+  ];
 
-  // Price formula — transparent and easy to adjust from admin later.
-  // Base: 3 BDT per Mbps per device per day. Volume discount after 10 days.
   const pricePerMbpsPerDay = 3;
-  const volumeDiscount = days >= 30 ? 0.75 : days >= 15 ? 0.85 : days >= 10 ? 0.9 : 1;
-  const price = Math.round(devices * speedMbps * days * pricePerMbpsPerDay * volumeDiscount);
+  const volumeDiscount = (d) => d >= 30 ? 0.75 : d >= 15 ? 0.85 : d >= 10 ? 0.9 : 1;
+  const price = (devices && speedMbps && days)
+    ? Math.round(devices * speedMbps * days * pricePerMbpsPerDay * volumeDiscount(days))
+    : 0;
+
+  const canNext = (step === 1 && devices) || (step === 2 && speedMbps) || (step === 3 && days);
+  const totalSteps = 4;
 
   async function submit() {
     setErr('');
@@ -2226,13 +2309,8 @@ function CustomBuilder() {
     setSubmit(true);
     try {
       const res = await api.post('/orders/custom', {
-        devices,
-        speed_mbps: speedMbps,
-        duration_days: days,
-        price,
-        full_name: fullName.trim(),
-        phone: phone.trim(),
-        address: address.trim(),
+        devices, speed_mbps: speedMbps, duration_days: days, price,
+        full_name: fullName.trim(), phone: phone.trim(), address: address.trim(),
       });
       setCreated(res.data);
     } catch (e) {
@@ -2247,15 +2325,23 @@ function CustomBuilder() {
   if (created) {
     return (
       <Layout branding={info.branding} support={info.support}>
-        <div className="card" style={{ textAlign: 'center', borderColor: color }}>
-          <div style={{ fontSize: 24, marginBottom: 10 }}>✅ Order placed</div>
-          <div style={{ fontSize: 14, color: '#cbd5e1', marginBottom: 16 }}>
-            Your order code: <strong style={{ color }}>{created.order_code}</strong>
+        <div className="card" style={{ textAlign: 'center', padding: 32, borderColor: `${color}55` }}>
+          <div style={{
+            width: 64, height: 64, borderRadius: '50%', background: `${color}22`,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 32, marginBottom: 18,
+          }}>✓</div>
+          <h2 className="display" style={{ margin: '0 0 8px', fontSize: 30 }}>Order placed</h2>
+          <div style={{ fontSize: 14, color: '#94a3b8', marginBottom: 20 }}>
+            Your order code:{' '}
+            <strong style={{ color, fontFamily: 'monospace', fontSize: 18 }}>
+              {created.order_code}
+            </strong>
           </div>
-          <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 16 }}>
-            Please complete payment. You'll get a Telegram/SMS confirmation once approved.
+          <div className="muted" style={{ marginBottom: 24, fontSize: 13 }}>
+            Please complete payment. You'll get a Telegram / SMS confirmation once approved.
           </div>
-          <Link to="/portal" className="btn btn-ghost">← Back to home</Link>
+          <Link to="/portal" className="btn btn-ghost">&larr; Back to home</Link>
         </div>
       </Layout>
     );
@@ -2263,105 +2349,190 @@ function CustomBuilder() {
 
   return (
     <Layout branding={info.branding} support={info.support}>
-      <div style={{ marginBottom: 18 }}>
-        <Link to="/portal" style={{ fontSize: 13 }}>← Back</Link>
+      <div style={{ marginBottom: 14 }}>
+        <Link to="/portal" style={{ fontSize: 13, color: '#94a3b8' }}>&larr; Back</Link>
       </div>
 
-      <div className="kicker" style={{ textAlign: 'center', marginBottom: 8 }}>Custom plan</div>
-      <h2 style={{ margin: '0 0 6px', textAlign: 'center', fontSize: 24 }}>
-        Build your <em style={{ color }}>own</em> package
-      </h2>
-      <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: 13, marginBottom: 28 }}>
-        Choose how many devices, how fast, and for how long. Price updates live.
-      </p>
-
-      {/* Devices */}
-      <OptionGroup label="How many devices?" value={devices} options={DEVICES_OPTS}
-        format={(v) => `${v} device${v > 1 ? 's' : ''}`} onChange={setDevices} color={color} />
-
-      {/* Speed */}
-      <OptionGroup label="Speed" value={speedMbps} options={SPEEDS_OPTS}
-        format={(v) => `${v} Mbps`} onChange={setSpeed} color={color} />
-
-      {/* Duration */}
-      <OptionGroup label="Duration" value={days} options={DAYS_OPTS}
-        format={(v) => v === 1 ? '1 day' : `${v} days`} onChange={setDays} color={color} />
-
-      {/* Price summary */}
-      <div className="card" style={{
-        margin: '24px 0', background: `${color}11`, border: `1px solid ${color}55`,
-        textAlign: 'center',
-      }}>
-        <div style={{ fontSize: 11, color: '#94a3b8', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: 6 }}>
-          Your price
-        </div>
-        <div style={{ fontSize: 36, fontWeight: 700, color, lineHeight: 1 }}>
-          {sym}{price}
-        </div>
-        <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 8 }}>
-          {devices} device{devices > 1 ? 's' : ''} · {speedMbps} Mbps · {days} day{days > 1 ? 's' : ''}
-          {volumeDiscount < 1 && (
-            <span style={{ color, fontWeight: 600 }}> · {Math.round((1 - volumeDiscount) * 100)}% off</span>
-          )}
-        </div>
+      {/* Progress bar */}
+      <div className="step-dots">
+        {[1, 2, 3, 4].map((s) => (
+          <span key={s} className={s === step ? 'on' : s < step ? 'done' : ''} />
+        ))}
+      </div>
+      <div style={{ textAlign: 'center', fontSize: 12, color: '#78787e', marginTop: -18, marginBottom: 24 }}>
+        Step {step} of {totalSteps}
       </div>
 
-      {/* Contact details */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 12, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-          Your details
-        </div>
-        <div style={{ display: 'grid', gap: 10 }}>
-          <input placeholder="Full name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
-          <input placeholder="Phone (01XXXXXXXXX)" value={phone} onChange={(e) => setPhone(e.target.value)} />
-          <input placeholder="Address (optional)" value={address} onChange={(e) => setAddress(e.target.value)} />
-        </div>
-      </div>
-
-      {err && (
-        <div className="card" style={{ marginBottom: 12, borderColor: '#ef4444', background: '#ef44441a', color: '#fca5a5', fontSize: 13 }}>
-          {err}
-        </div>
+      {/* STEP 1 · Devices */}
+      {step === 1 && (
+        <WizardStep
+          kicker="Step 1"
+          title={<>How many <em style={{ color }}>devices</em>?</>}
+          subtitle="This helps us pick the right connection profile."
+        >
+          <OptionGrid
+            options={DEVICES_OPTS}
+            value={devices}
+            onChange={setDevices}
+            color={color}
+          />
+        </WizardStep>
       )}
 
-      <button onClick={submit} disabled={submitting} className="btn" style={{ width: '100%', padding: 14, fontSize: 15 }}>
-        {submitting ? 'Placing order…' : `Order for ${sym}${price}`}
-      </button>
+      {/* STEP 2 · Speed */}
+      {step === 2 && (
+        <WizardStep
+          kicker="Step 2"
+          title={<>Choose your <em style={{ color }}>speed</em></>}
+          subtitle="All plans run on Starlink — pick what matches your use."
+        >
+          <OptionGrid
+            options={SPEEDS_OPTS}
+            value={speedMbps}
+            onChange={setSpeed}
+            color={color}
+          />
+        </WizardStep>
+      )}
+
+      {/* STEP 3 · Duration */}
+      {step === 3 && (
+        <WizardStep
+          kicker="Step 3"
+          title={<>Pick a <em style={{ color }}>duration</em></>}
+          subtitle="Longer plans come with automatic volume discount."
+        >
+          <OptionGrid
+            options={DAYS_OPTS}
+            value={days}
+            onChange={setDays}
+            color={color}
+          />
+        </WizardStep>
+      )}
+
+      {/* STEP 4 · Review + contact */}
+      {step === 4 && (
+        <WizardStep
+          kicker="Step 4"
+          title={<>Almost <em style={{ color }}>there</em></>}
+          subtitle="Quick contact details so we can activate your service."
+        >
+          {/* Sticky summary card */}
+          <div className="card" style={{
+            background: `linear-gradient(135deg, ${color}18, ${color}05)`,
+            border: `1px solid ${color}55`, textAlign: 'center',
+            marginBottom: 18,
+          }}>
+            <div className="label" style={{ marginBottom: 4 }}>Your plan</div>
+            <div className="display" style={{ fontSize: 48, color, marginBottom: 4 }}>
+              {sym}{price}
+            </div>
+            <div style={{ fontSize: 13, color: '#94a3b8' }}>
+              {devices} device{devices > 1 ? 's' : ''} · {speedMbps} Mbps · {days} day{days > 1 ? 's' : ''}
+              {volumeDiscount(days) < 1 && (
+                <> · <span style={{ color, fontWeight: 600 }}>{Math.round((1 - volumeDiscount(days)) * 100)}% off</span></>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gap: 12 }}>
+            <div>
+              <label className="label">Full name</label>
+              <input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Your full name" />
+            </div>
+            <div>
+              <label className="label">Phone</label>
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="01XXXXXXXXX" />
+            </div>
+            <div>
+              <label className="label">Address <span style={{ textTransform: 'none', opacity: 0.6 }}>(optional)</span></label>
+              <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Street, city" />
+            </div>
+          </div>
+
+          {err && <div className="err">{err}</div>}
+        </WizardStep>
+      )}
+
+      {/* Nav buttons */}
+      <div style={{ display: 'flex', gap: 10, marginTop: 28 }}>
+        {step > 1 && (
+          <button onClick={() => { setStep(step - 1); setErr(''); }} className="btn btn-ghost" style={{ flex: 1 }}>
+            &larr; Back
+          </button>
+        )}
+        {step < 4 && (
+          <button
+            onClick={() => canNext && setStep(step + 1)}
+            disabled={!canNext}
+            className="btn"
+            style={{ flex: 2 }}
+          >
+            Continue &rarr;
+          </button>
+        )}
+        {step === 4 && (
+          <button onClick={submit} disabled={submitting} className="btn" style={{ flex: 2 }}>
+            {submitting ? 'Placing order…' : `Place order · ${sym}${price}`}
+          </button>
+        )}
+      </div>
     </Layout>
   );
 }
 
-function OptionGroup({ label, value, options, format, onChange, color }) {
+function WizardStep({ kicker, title, subtitle, children }) {
   return (
-    <div style={{ marginBottom: 18 }}>
-      <div style={{
-        fontSize: 11, color: '#94a3b8', letterSpacing: '0.15em',
-        textTransform: 'uppercase', marginBottom: 8,
-      }}>
-        {label}
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${options.length}, 1fr)`, gap: 8 }}>
-        {options.map((opt) => (
+    <div>
+      <div className="kicker" style={{ textAlign: 'center', marginBottom: 8 }}>{kicker}</div>
+      <h2 className="display" style={{ margin: '0 0 8px', textAlign: 'center', fontSize: 34 }}>{title}</h2>
+      {subtitle && <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: 14, marginBottom: 28 }}>{subtitle}</p>}
+      {children}
+    </div>
+  );
+}
+
+function OptionGrid({ options, value, onChange, color }) {
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      {options.map((opt) => {
+        const sel = value === opt.v;
+        return (
           <button
-            key={opt}
-            onClick={() => onChange(opt)}
+            key={opt.v}
+            onClick={() => onChange(opt.v)}
             style={{
-              padding: '14px 8px',
-              background: value === opt ? color : '#16161a',
-              color: value === opt ? '#0b0b0d' : '#e7e7e9',
-              border: value === opt ? `1px solid ${color}` : '1px solid #2a2a30',
-              borderRadius: 8,
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-              transition: 'all 0.15s',
+              padding: '16px 18px', textAlign: 'left',
+              background: sel
+                ? `linear-gradient(135deg, ${color}22, ${color}08)`
+                : 'linear-gradient(180deg,#15151a 0%,#101014 100%)',
+              color: '#e7e7e9',
+              border: sel ? `1px solid ${color}` : '1px solid #26262b',
+              boxShadow: sel ? `0 0 0 2px ${color}33, 0 8px 24px ${color}22` : 'none',
+              borderRadius: 14, cursor: 'pointer', fontFamily: 'inherit',
+              transition: 'all 0.18s', display: 'flex', alignItems: 'center', gap: 14,
             }}
           >
-            {format(opt)}
+            <div style={{
+              width: 40, height: 40, borderRadius: 10,
+              background: sel ? color : '#101014',
+              color: sel ? '#0b0b0d' : color,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontWeight: 700, fontSize: 18, border: sel ? 'none' : `1px solid ${color}44`,
+              flexShrink: 0,
+            }}>
+              {sel ? '✓' : opt.v}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 2 }}>{opt.label}</div>
+              <div style={{ fontSize: 12, color: opt.discount ? color : '#78787e' }}>
+                {opt.sub}
+              </div>
+            </div>
           </button>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }
