@@ -154,3 +154,39 @@
     padding-top: 0;
   }
 }
+
+/* ────────────────────────────────────────────────────────────
+   Mobile responsive overrides
+   Most pages use px-8/py-8/p-8 for desktop comfort. On phones
+   that wastes a third of the screen. These rules compress
+   padding and huge type without touching every page.
+   ──────────────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  main .px-8  { padding-left: 1rem; padding-right: 1rem; }
+  main .py-8  { padding-top: 1rem; padding-bottom: 1rem; }
+  main .p-8   { padding: 1rem; }
+  main .p-6   { padding: 0.875rem; }
+  main .gap-6 { gap: 0.75rem; }
+  main .gap-8 { gap: 1rem; }
+
+  /* Large display headings shrink on phones */
+  main .text-5xl { font-size: 2rem; line-height: 1.1; }
+  main .text-4xl { font-size: 1.75rem; line-height: 1.1; }
+  main .text-3xl { font-size: 1.5rem; line-height: 1.15; }
+
+  /* Tables — make sure they scroll instead of overflowing the page */
+  main table { min-width: 100%; }
+  main .panel { border-radius: 2px; }
+
+  /* Buttons — bigger tap target on touch devices */
+  .btn { min-height: 38px; }
+  .input { min-height: 38px; font-size: 14px; }
+
+  /* Inputs larger so iOS doesn't zoom in on focus */
+  input, select, textarea { font-size: 16px !important; }
+}
+
+/* Prevent horizontal scroll from any rogue wide element on mobile */
+@media (max-width: 767px) {
+  body { overflow-x: hidden; }
+}
