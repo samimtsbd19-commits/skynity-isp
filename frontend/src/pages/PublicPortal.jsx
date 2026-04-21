@@ -345,8 +345,22 @@ function Landing() {
         </div>
       )}
 
-      {/* ─── HERO ─── Big gradient statement + CTA pair ─── */}
-      <section style={{ textAlign: 'center', padding: '32px 0 40px', position: 'relative' }}>
+      {/* ─── Announcement ticker ─── */}
+      {info.landing?.announcement_enabled && info.landing?.announcement && (
+        <AnnouncementTicker text={info.landing.announcement} color={color} />
+      )}
+
+      {/* ─── Hero carousel ─── */}
+      {info.landing?.hero_images?.length > 0 && (
+        <HeroCarousel
+          images={info.landing.hero_images}
+          rotateMs={info.landing.hero_rotate_ms || 4500}
+          color={color}
+        />
+      )}
+
+      {/* ─── Hero text + CTA ─── */}
+      <section style={{ textAlign: 'center', padding: '32px 0 32px', position: 'relative' }}>
         <div className="hero-badge">
           <span style={{ width: 6, height: 6, borderRadius: 999, background: color, boxShadow: `0 0 8px ${color}` }} />
           Powered by Starlink · Low-latency satellite
@@ -374,6 +388,16 @@ function Landing() {
           <a href="#plans" className="btn btn-ghost btn-lg">Browse presets</a>
         </div>
       </section>
+
+      {/* ─── Trial spotlight ─── */}
+      {info.landing?.trial_banner_enabled && (
+        <TrialSpotlight
+          days={info.landing.trial_days}
+          speed={info.landing.trial_speed_mbps}
+          color={color}
+          onClaim={() => nav('/portal/trial')}
+        />
+      )}
 
       <div id="plans" className="kicker" style={{ textAlign: 'center', marginBottom: 10 }}>
         Ready-made packages
@@ -2248,6 +2272,173 @@ export default function PublicPortal() {
       <Route path="/status/:code" element={<StatusLookup />} />
       <Route path="*" element={<Navigate to="/portal" replace />} />
     </Routes>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// Announcement Ticker — full-width scrolling bar at the top
+// ═════════════════════════════════════════════════════════════
+function AnnouncementTicker({ text, color }) {
+  return (
+    <div style={{
+      background: `linear-gradient(90deg, ${color}15, ${color}25, ${color}15)`,
+      borderTop: `1px solid ${color}33`,
+      borderBottom: `1px solid ${color}33`,
+      padding: '9px 0',
+      marginTop: -8, marginBottom: 12,
+      overflow: 'hidden', position: 'relative',
+    }}>
+      <style>{`
+        @keyframes ticker-slide {
+          0%   { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        .ticker-track{display:inline-flex;gap:48px;white-space:nowrap;animation:ticker-slide 28s linear infinite;padding-right:48px}
+        .ticker-item{font-size:13px;color:#e7e7e9;letter-spacing:.03em;font-weight:500}
+      `}</style>
+      <div className="ticker-track">
+        {/* Duplicate twice so the loop is seamless */}
+        {[0, 1].map((loop) => (
+          <span key={loop} className="ticker-track">
+            {text.split('·').map((item, i) => (
+              <span key={i} className="ticker-item">{item.trim()}</span>
+            ))}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// Hero Carousel — crossfade between images, Ken-Burns zoom
+// ═════════════════════════════════════════════════════════════
+function HeroCarousel({ images, rotateMs, color }) {
+  const [idx, setIdx] = useState(0);
+  useEffect(() => {
+    if (images.length < 2) return;
+    const id = setInterval(() => setIdx((i) => (i + 1) % images.length), rotateMs);
+    return () => clearInterval(id);
+  }, [images.length, rotateMs]);
+
+  return (
+    <section style={{
+      position: 'relative', borderRadius: 20, overflow: 'hidden',
+      marginBottom: 8, height: 220, border: '1px solid #26262b',
+      boxShadow: '0 16px 48px rgba(0,0,0,.35)',
+    }}>
+      <style>{`
+        @keyframes hero-zoom {
+          0%   { transform: scale(1.0);  }
+          100% { transform: scale(1.12); }
+        }
+        .hero-img{position:absolute;inset:0;background-size:cover;background-position:center;animation:hero-zoom 10s ease-in-out infinite alternate;transition:opacity 1s ease}
+      `}</style>
+      {images.map((img, i) => (
+        <div
+          key={img.url + i}
+          className="hero-img"
+          style={{
+            backgroundImage: `url(${img.url})`,
+            opacity: i === idx ? 1 : 0,
+            zIndex: i === idx ? 2 : 1,
+          }}
+        />
+      ))}
+      {/* Overlay gradient for text legibility */}
+      <div style={{
+        position: 'absolute', inset: 0, zIndex: 3,
+        background: 'linear-gradient(180deg, rgba(10,10,11,0.3) 0%, rgba(10,10,11,0.9) 100%)',
+      }} />
+      {/* Caption */}
+      <div style={{
+        position: 'absolute', bottom: 16, left: 20, right: 20, zIndex: 4,
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12,
+      }}>
+        <div style={{ fontSize: 16, fontWeight: 600, letterSpacing: '.01em', lineHeight: 1.3 }}>
+          {images[idx]?.caption}
+        </div>
+        {images.length > 1 && (
+          <div style={{ display: 'flex', gap: 6 }}>
+            {images.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => setIdx(i)}
+                aria-label={`Slide ${i + 1}`}
+                style={{
+                  width: i === idx ? 20 : 6, height: 6, borderRadius: 999,
+                  background: i === idx ? color : '#ffffff55', border: 0, cursor: 'pointer',
+                  transition: 'all 0.2s', padding: 0,
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// Trial Spotlight — premium "first-time free" banner
+// ═════════════════════════════════════════════════════════════
+function TrialSpotlight({ days, speed, color, onClaim }) {
+  return (
+    <button
+      onClick={onClaim}
+      style={{
+        width: '100%', padding: 0, marginBottom: 32,
+        background: 'transparent', border: 0, cursor: 'pointer',
+        font: 'inherit', color: 'inherit',
+      }}
+    >
+      <div style={{
+        position: 'relative', padding: '22px 24px', borderRadius: 18,
+        background: `
+          radial-gradient(circle at 0% 0%, ${color}33 0%, transparent 50%),
+          linear-gradient(135deg, ${color}18, ${color}08)
+        `,
+        border: `1px solid ${color}77`,
+        display: 'flex', alignItems: 'center', gap: 18,
+        boxShadow: `0 12px 36px ${color}22`, overflow: 'hidden', textAlign: 'left',
+      }}>
+        {/* animated sparkle */}
+        <style>{`
+          @keyframes trial-pulse {
+            0%,100% { opacity: .4; transform: scale(1); }
+            50%     { opacity: 1;  transform: scale(1.1); }
+          }
+        `}</style>
+        <div style={{
+          width: 56, height: 56, borderRadius: 14, flexShrink: 0,
+          background: color, color: '#0b0b0d',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 28, fontWeight: 700,
+          boxShadow: `0 8px 24px ${color}66`,
+        }}>🎁</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            display: 'inline-block', fontSize: 10, letterSpacing: '.2em',
+            textTransform: 'uppercase', color,
+            background: `${color}18`, padding: '3px 10px', borderRadius: 999,
+            marginBottom: 6, fontWeight: 600,
+          }}>
+            New customer offer
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 3 }}>
+            {days} days FREE
+            <span style={{ color: '#94a3b8', fontWeight: 500 }}> · up to {speed} Mbps</span>
+          </div>
+          <div style={{ fontSize: 12, color: '#94a3b8' }}>
+            One-tap claim · no card required · only phone number
+          </div>
+        </div>
+        <div style={{
+          color, fontSize: 22, fontWeight: 700, flexShrink: 0,
+          animation: 'trial-pulse 2s ease-in-out infinite',
+        }}>&rarr;</div>
+      </div>
+    </button>
   );
 }
 

@@ -154,7 +154,11 @@ async function paymentInfo() {
 // ============================================================
 router.get('/packages', getLimiter, async (_req, res) => {
   try {
-    const [pkgs, brandName, logoUrl, primaryColor, pay, flags, androidUrl, iosUrl, content, support] = await Promise.all([
+    const [
+      pkgs, brandName, logoUrl, primaryColor, pay, flags, androidUrl, iosUrl, content, support,
+      announcementEnabled, announcement, heroImages, heroRotateMs,
+      trialBannerEnabled, trialDays, trialSpeed,
+    ] = await Promise.all([
       publicPackageInfo(),
       settings.getSetting('site.name'),
       settings.getSetting('branding.logo_url'),
@@ -165,7 +169,21 @@ router.get('/packages', getLimiter, async (_req, res) => {
       settings.getSetting('site.app_ios_url'),
       publicPortalContent(),
       publicSupportInfo(),
+      settings.getSetting('portal.announcement_enabled'),
+      settings.getSetting('portal.announcement'),
+      settings.getSetting('portal.hero_images'),
+      settings.getSetting('portal.hero_rotate_ms'),
+      settings.getSetting('portal.trial_banner_enabled'),
+      settings.getSetting('portal.trial_days'),
+      settings.getSetting('portal.trial_speed_mbps'),
     ]);
+
+    let heroArr = [];
+    try {
+      heroArr = typeof heroImages === 'string' ? JSON.parse(heroImages) : (heroImages || []);
+      if (!Array.isArray(heroArr)) heroArr = [];
+    } catch { heroArr = []; }
+
     res.json({
       packages: pkgs,
       branding: {
@@ -183,6 +201,15 @@ router.get('/packages', getLimiter, async (_req, res) => {
       },
       content,
       support,
+      landing: {
+        announcement_enabled: announcementEnabled === 'true' || announcementEnabled === true,
+        announcement: announcement || '',
+        hero_images: heroArr,
+        hero_rotate_ms: Number(heroRotateMs) || 4500,
+        trial_banner_enabled: trialBannerEnabled === 'true' || trialBannerEnabled === true,
+        trial_days: Number(trialDays) || 7,
+        trial_speed_mbps: Number(trialSpeed) || 3,
+      },
     });
   } catch (err) {
     logger.error({ err }, 'portal packages failed');
