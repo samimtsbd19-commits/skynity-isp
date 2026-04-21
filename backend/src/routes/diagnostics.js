@@ -328,4 +328,284 @@ router.get('/mikrotik/live/:routerId?', requireAdmin, async (req, res) => {
   }
 });
 
+// ═════════════════════════════════════════════════════════════
+// Hotspot Security & Health — audit + one-click fixes
+// ═════════════════════════════════════════════════════════════
+router.get('/hotspot/audit', requireAdmin, async (req, res) => {
+  try {
+    const rid = req.query.routerId ? Number(req.query.routerId) : null;
+    const client = await getMikrotikClient(rid);
+
+    const [
+      serverProfiles, servers, activeUsers, cookies, hosts,
+      dhcpPools, dhcpLeases, walledGarden,
+    ] = await Promise.all([
+      client.get('/ip/hotspot/profile').catch(() => []),
+      client.get('/ip/hotspot').catch(() => []),
+      client.get('/ip/hotspot/active').catch(() => []),
+      client.get('/ip/hotspot/cookie').catch(() => []),
+      client.get('/ip/hotspot/host').catch(() => []),
+      client.get('/ip/pool').catch(() => []),
+      client.get('/ip/dhcp-server/lease').catch(() => []),
+      client.get('/ip/hotspot/walled-garden').catch(() => []),
+    ]);
+
+    const findings = [];
+
+    // Check each hotspot server profile
+    for (const p of serverProfiles) {
+      // Cookies enabled + long lifetime = "stuck login" problem
+      const cookieLife = String(p['http-cookie-lifetime'] || '').toLowerCase();
+      const usesCookies = cookieLife && cookieLife !== '0s' && cookieLife !== '0';
+      if (usesCookies && /\d+d/.test(cookieLife)) {
+        findings.push({
+          id: `cookie-long-${p['.id']}`,
+          severity: 'warn',
+          category: 'cookies',
+          title: `Long HTTP cookie lifetime (${cookieLife})`,
+          description: 'Cached cookies on user devices can block new logins when the cookie goes stale. This is why "yesterday worked, today fails" happens.',
+          detail: `Profile: ${p.name}`,
+          fix_label: 'Shorten to 1h',
+          fix_action: 'cookie-short',
+          fix_target: p['.id'],
+        });
+      }
+
+      // MAC auth enabled without MAC password = weak, but can cause login loops
+      if (p['mac-auth'] === 'true' || p['mac-auth'] === true) {
+        findings.push({
+          id: `mac-auth-${p['.id']}`,
+          severity: 'info',
+          category: 'auth',
+          title: 'MAC authentication enabled',
+          description: 'MAC auth auto-logs-in returning devices. If customers replace phones or MAC randomizes, they cannot reconnect. Disable it if customers complain.',
+          detail: `Profile: ${p.name}`,
+          fix_label: 'Disable MAC auth',
+          fix_action: 'disable-mac-auth',
+          fix_target: p['.id'],
+        });
+      }
+
+      // Short idle-timeout kicks users too aggressively
+      const idle = String(p['idle-timeout'] || '').toLowerCase();
+      const idleMatch = idle.match(/^(\d+)m$/);
+      if (idleMatch && Number(idleMatch[1]) < 5) {
+        findings.push({
+          id: `idle-short-${p['.id']}`,
+          severity: 'warn',
+          category: 'timeout',
+          title: `Idle timeout too short (${idle})`,
+          description: 'Users get kicked after short idle — mobile devices sleep and lose session.',
+          detail: `Profile: ${p.name}`,
+          fix_label: 'Set to 10m',
+          fix_action: 'idle-10m',
+          fix_target: p['.id'],
+        });
+      }
+    }
+
+    // Stale cookies building up
+    if (Array.isArray(cookies) && cookies.length > 50) {
+      findings.push({
+        id: 'too-many-cookies',
+        severity: 'warn',
+        category: 'cookies',
+        title: `${cookies.length} stored cookies — cleanup recommended`,
+        description: 'Old cookies from previous devices accumulate and can block new logins for same MAC/IP.',
+        fix_label: 'Clear all cookies',
+        fix_action: 'clear-cookies',
+      });
+    }
+
+    // DHCP pool nearly full
+    for (const pool of dhcpPools) {
+      const range = pool.ranges || '';
+      const m = range.match(/(\d+\.\d+\.\d+\.)(\d+)-\d+\.\d+\.\d+\.(\d+)/);
+      if (m) {
+        const total = Number(m[3]) - Number(m[2]) + 1;
+        const usedInPool = dhcpLeases.filter((l) => {
+          const ip = l.address;
+          return ip && ip.startsWith(m[1]);
+        }).length;
+        const pct = Math.round((usedInPool / total) * 100);
+        if (pct > 80) {
+          findings.push({
+            id: `pool-full-${pool['.id']}`,
+            severity: pct > 95 ? 'error' : 'warn',
+            category: 'dhcp',
+            title: `DHCP pool ${pool.name} ${pct}% full`,
+            description: `${usedInPool} of ${total} IPs in use. New users will fail to get an IP.`,
+            detail: `Range: ${range}`,
+          });
+        }
+      }
+    }
+
+    // Stale hosts (authorized but no active session)
+    const activeIps = new Set(activeUsers.map((u) => u.address));
+    const staleHosts = hosts.filter((h) => (h.authorized === 'true' || h.authorized === true) && !activeIps.has(h.address));
+    if (staleHosts.length > 20) {
+      findings.push({
+        id: 'stale-hosts',
+        severity: 'info',
+        category: 'cache',
+        title: `${staleHosts.length} stale authorized hosts`,
+        description: 'Old host entries from previous sessions. Clearing them forces a fresh login next time those MACs appear.',
+        fix_label: 'Clear stale hosts',
+        fix_action: 'clear-stale-hosts',
+      });
+    }
+
+    // Walled garden — check for common blockers
+    if (Array.isArray(walledGarden) && walledGarden.length === 0) {
+      findings.push({
+        id: 'no-walled-garden',
+        severity: 'info',
+        category: 'walled-garden',
+        title: 'No walled-garden rules',
+        description: 'Consider allowing common captive-portal detection URLs (apple.com/library, connectivitycheck.android.com) so iOS/Android auto-opens the login page.',
+        fix_label: 'Add standard CP detection',
+        fix_action: 'walled-garden-defaults',
+      });
+    }
+
+    res.json({
+      ts: new Date().toISOString(),
+      findings,
+      stats: {
+        servers: servers.length,
+        server_profiles: serverProfiles.length,
+        active_sessions: activeUsers.length,
+        stored_cookies: cookies.length,
+        authorized_hosts: hosts.filter((h) => h.authorized === 'true' || h.authorized === true).length,
+        total_hosts: hosts.length,
+        stale_hosts: staleHosts.length,
+        dhcp_leases: dhcpLeases.length,
+        walled_garden_rules: walledGarden.length,
+      },
+      server_profiles: serverProfiles.map((p) => ({
+        id: p['.id'],
+        name: p.name,
+        login_by: p['login-by'],
+        http_cookie_lifetime: p['http-cookie-lifetime'],
+        mac_auth: p['mac-auth'],
+        idle_timeout: p['idle-timeout'],
+        keepalive_timeout: p['keepalive-timeout'],
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ── One-click fixes ─────────────────────────────────────────
+router.post('/hotspot/fix/:action', requireAdmin, requireRole('superadmin', 'admin'), async (req, res) => {
+  try {
+    const rid = req.body?.routerId ? Number(req.body.routerId) : null;
+    const target = req.body?.target || req.params.target;
+    const client = await getMikrotikClient(rid);
+    const action = req.params.action;
+
+    let result;
+    switch (action) {
+      case 'clear-cookies': {
+        const cookies = await client.get('/ip/hotspot/cookie').catch(() => []);
+        let deleted = 0;
+        for (const c of cookies) {
+          try { await client.del(`/ip/hotspot/cookie/${encodeURIComponent(c['.id'])}`); deleted++; }
+          catch { /* skip */ }
+        }
+        result = { ok: true, message: `Deleted ${deleted} cookie${deleted !== 1 ? 's' : ''}` };
+        break;
+      }
+      case 'clear-stale-hosts': {
+        const hosts = await client.get('/ip/hotspot/host').catch(() => []);
+        const active = await client.get('/ip/hotspot/active').catch(() => []);
+        const activeIps = new Set(active.map((u) => u.address));
+        let deleted = 0;
+        for (const h of hosts) {
+          if ((h.authorized === 'true' || h.authorized === true) && !activeIps.has(h.address)) {
+            try { await client.del(`/ip/hotspot/host/${encodeURIComponent(h['.id'])}`); deleted++; }
+            catch { /* skip */ }
+          }
+        }
+        result = { ok: true, message: `Removed ${deleted} stale host${deleted !== 1 ? 's' : ''}` };
+        break;
+      }
+      case 'cookie-short': {
+        await client.patch(`/ip/hotspot/profile/${encodeURIComponent(target)}`, {
+          'http-cookie-lifetime': '1h',
+        });
+        result = { ok: true, message: 'Cookie lifetime set to 1 hour' };
+        break;
+      }
+      case 'cookie-disable': {
+        await client.patch(`/ip/hotspot/profile/${encodeURIComponent(target)}`, {
+          'http-cookie-lifetime': '0s',
+        });
+        result = { ok: true, message: 'Cookies disabled' };
+        break;
+      }
+      case 'disable-mac-auth': {
+        await client.patch(`/ip/hotspot/profile/${encodeURIComponent(target)}`, {
+          'mac-auth': 'false',
+        });
+        result = { ok: true, message: 'MAC auth disabled' };
+        break;
+      }
+      case 'idle-10m': {
+        await client.patch(`/ip/hotspot/profile/${encodeURIComponent(target)}`, {
+          'idle-timeout': '10m',
+        });
+        result = { ok: true, message: 'Idle timeout set to 10 minutes' };
+        break;
+      }
+      case 'walled-garden-defaults': {
+        const defaults = [
+          { 'dst-host': '*.apple.com' },
+          { 'dst-host': 'captive.apple.com' },
+          { 'dst-host': 'connectivitycheck.gstatic.com' },
+          { 'dst-host': 'connectivitycheck.android.com' },
+          { 'dst-host': 'www.msftconnecttest.com' },
+          { 'dst-host': 'www.gstatic.com' },
+        ];
+        let added = 0;
+        for (const rule of defaults) {
+          try { await client.put('/ip/hotspot/walled-garden', rule); added++; }
+          catch { /* skip */ }
+        }
+        result = { ok: true, message: `Added ${added} walled-garden rules for captive-portal detection` };
+        break;
+      }
+      case 'optimize-public-hotspot': {
+        // All-in-one: clear cookies + stale hosts + reasonable profile defaults
+        let steps = [];
+        try {
+          const cookies = await client.get('/ip/hotspot/cookie').catch(() => []);
+          for (const c of cookies) await client.del(`/ip/hotspot/cookie/${encodeURIComponent(c['.id'])}`).catch(() => {});
+          steps.push(`cleared ${cookies.length} cookies`);
+        } catch {}
+        try {
+          const profiles = await client.get('/ip/hotspot/profile').catch(() => []);
+          for (const p of profiles) {
+            if (p.name === 'default') continue; // don't touch the wizard default
+            await client.patch(`/ip/hotspot/profile/${encodeURIComponent(p['.id'])}`, {
+              'http-cookie-lifetime': '1h',
+              'idle-timeout': '10m',
+            }).catch(() => {});
+          }
+          steps.push('tuned profile timeouts');
+        } catch {}
+        result = { ok: true, message: `Optimized: ${steps.join(' · ')}` };
+        break;
+      }
+      default:
+        return res.status(400).json({ ok: false, error: `Unknown action: ${action}` });
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 export default router;

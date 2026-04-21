@@ -3,13 +3,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle2, XCircle, RefreshCw, Zap, Send, Bot, Database,
   Activity, Wifi, AlertCircle, Eye, EyeOff, Save, Play, Cpu,
-  MemoryStick, Clock, Settings as Cog,
+  MemoryStick, Clock, Settings as Cog, ShieldAlert, Cookie, Trash2,
+  Sparkles, Wrench, Radio,
 } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import {
   apiDiagStatus, apiDiagTelegramTest, apiDiagTelegramRestart,
   apiDiagAiTest, apiDiagMikrotikTest, apiDiagMikrotikLive,
   apiSettings, apiSettingsBulk,
+  apiHotspotAudit, apiHotspotFix,
 } from '../api/client';
 
 // ── Status pill ──────────────────────────────────────────────
@@ -78,6 +80,238 @@ export default function Diagnostics() {
         <MikroTikCard status={status.data?.mikrotik} />
         <InfraCard    status={status.data} />
       </div>
+
+      {/* Full-width Hotspot Security & Health audit */}
+      <div className="px-8 pb-8">
+        <HotspotAuditCard />
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// HOTSPOT SECURITY & HEALTH
+// ═════════════════════════════════════════════════════════════
+function HotspotAuditCard() {
+  const qc = useQueryClient();
+  const [fixMsg, setFixMsg] = useState(null);
+  const [fixingId, setFixingId] = useState(null);
+
+  const audit = useQuery({
+    queryKey: ['hotspot-audit'],
+    queryFn: () => apiHotspotAudit(),
+    refetchInterval: 30_000,
+  });
+
+  async function runFix(action, target = null, findingId = null) {
+    setFixingId(findingId || action);
+    setFixMsg(null);
+    try {
+      const body = target ? { target } : {};
+      const r = await apiHotspotFix(action, body);
+      setFixMsg({ ok: r.ok, text: r.message || (r.ok ? 'Done' : r.error) });
+      qc.invalidateQueries({ queryKey: ['hotspot-audit'] });
+    } catch (err) {
+      setFixMsg({ ok: false, text: err.response?.data?.error || err.message });
+    } finally {
+      setFixingId(null);
+      setTimeout(() => setFixMsg(null), 5000);
+    }
+  }
+
+  const data = audit.data;
+  const findings = data?.findings || [];
+  const stats = data?.stats || {};
+  const critical = findings.filter((f) => f.severity === 'error').length;
+  const warnings = findings.filter((f) => f.severity === 'warn').length;
+  const info = findings.filter((f) => f.severity === 'info').length;
+
+  return (
+    <div className="panel p-5">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+        <div className="flex items-center gap-2">
+          <ShieldAlert size={16} className="text-amber" />
+          <h3 className="font-display text-lg">Hotspot Security & Health</h3>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {critical > 0 && <StatusPill label={`${critical} critical`} />}
+          {warnings > 0 && <StatusPill warn label={`${warnings} warning${warnings > 1 ? 's' : ''}`} />}
+          {info > 0 && <StatusPill ok label={`${info} info`} />}
+          {findings.length === 0 && data && <StatusPill ok label="All clear" />}
+          <button
+            onClick={() => runFix('optimize-public-hotspot')}
+            disabled={fixingId === 'optimize-public-hotspot'}
+            className="btn btn-primary text-xs"
+            title="One-click best practices for public hotspots"
+          >
+            <Sparkles size={12} /> {fixingId === 'optimize-public-hotspot' ? 'Optimizing…' : 'Optimize for Public Hotspot'}
+          </button>
+        </div>
+      </div>
+
+      {/* Stats row */}
+      {data && (
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 mb-5 text-xs font-mono">
+          <Stat label="Active" value={stats.active_sessions} />
+          <Stat label="Stored Cookies" value={stats.stored_cookies} warn={stats.stored_cookies > 50} />
+          <Stat label="Authorized Hosts" value={stats.authorized_hosts} />
+          <Stat label="Stale Hosts" value={stats.stale_hosts} warn={stats.stale_hosts > 20} />
+          <Stat label="DHCP Leases" value={stats.dhcp_leases} />
+          <Stat label="Profiles" value={stats.server_profiles} />
+        </div>
+      )}
+
+      {/* Findings list */}
+      {audit.isLoading && (
+        <div className="text-center text-text-mute font-mono text-sm py-8">
+          <Activity size={16} className="inline animate-pulse mr-2" /> Auditing hotspot…
+        </div>
+      )}
+      {audit.error && (
+        <div className="text-xs font-mono text-red bg-red/5 border border-red/30 rounded-sm p-3">
+          ✗ {audit.error.message}
+        </div>
+      )}
+      {data?.ok === false && (
+        <div className="text-xs font-mono text-red bg-red/5 border border-red/30 rounded-sm p-3">
+          ✗ {data.error}
+        </div>
+      )}
+
+      {findings.length === 0 && data && !audit.isLoading && (
+        <div className="text-center text-green font-mono text-sm py-4">
+          <CheckCircle2 size={16} className="inline mr-2" /> No issues detected — hotspot is healthy
+        </div>
+      )}
+
+      {findings.length > 0 && (
+        <div className="space-y-2">
+          {findings.map((f) => (
+            <FindingRow
+              key={f.id}
+              finding={f}
+              onFix={() => runFix(f.fix_action, f.fix_target, f.id)}
+              fixing={fixingId === f.id}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Quick actions */}
+      <div className="mt-5 pt-4 border-t border-border-dim">
+        <div className="text-mono text-[10px] uppercase tracking-widest text-text-mute mb-2">
+          Quick actions (use when user says "worked yesterday, fails today")
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => runFix('clear-cookies')}
+            disabled={fixingId === 'clear-cookies'}
+            className="btn btn-ghost text-xs"
+          >
+            <Cookie size={12} /> {fixingId === 'clear-cookies' ? 'Clearing…' : 'Clear All Cookies'}
+          </button>
+          <button
+            onClick={() => runFix('clear-stale-hosts')}
+            disabled={fixingId === 'clear-stale-hosts'}
+            className="btn btn-ghost text-xs"
+          >
+            <Trash2 size={12} /> {fixingId === 'clear-stale-hosts' ? 'Clearing…' : 'Clear Stale Hosts'}
+          </button>
+          <button
+            onClick={() => runFix('walled-garden-defaults')}
+            disabled={fixingId === 'walled-garden-defaults'}
+            className="btn btn-ghost text-xs"
+            title="Allow iOS/Android captive-portal detection URLs"
+          >
+            <Radio size={12} /> Add Captive-Portal Defaults
+          </button>
+        </div>
+      </div>
+
+      {fixMsg && (
+        <div className={`mt-3 text-xs font-mono p-2 rounded-sm border ${
+          fixMsg.ok ? 'text-green border-green/30 bg-green/5' : 'text-red border-red/30 bg-red/5'
+        }`}>
+          {fixMsg.ok ? '✓' : '✗'} {fixMsg.text}
+        </div>
+      )}
+
+      {/* Server profile details */}
+      {data?.server_profiles?.length > 0 && (
+        <details className="mt-5 text-xs">
+          <summary className="cursor-pointer text-text-mute font-mono uppercase tracking-wider text-[10px] hover:text-amber">
+            Server profile details ({data.server_profiles.length})
+          </summary>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-text-mute">
+                <tr>
+                  <th className="text-left px-2 py-1 font-mono">Profile</th>
+                  <th className="text-left px-2 py-1 font-mono">Login By</th>
+                  <th className="text-left px-2 py-1 font-mono">Cookie Lifetime</th>
+                  <th className="text-left px-2 py-1 font-mono">Idle Timeout</th>
+                  <th className="text-left px-2 py-1 font-mono">MAC Auth</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border-dim">
+                {data.server_profiles.map((p) => (
+                  <tr key={p.id}>
+                    <td className="px-2 py-1 font-mono">{p.name}</td>
+                    <td className="px-2 py-1 font-mono text-text-dim">{p.login_by || '—'}</td>
+                    <td className="px-2 py-1 font-mono text-text-dim">{p.http_cookie_lifetime || '—'}</td>
+                    <td className="px-2 py-1 font-mono text-text-dim">{p.idle_timeout || '—'}</td>
+                    <td className="px-2 py-1 font-mono text-text-dim">{p.mac_auth || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value, warn = false }) {
+  return (
+    <div className={`border rounded-sm px-3 py-2 ${warn ? 'border-amber/40 bg-amber/5' : 'border-border-dim bg-surface2/40'}`}>
+      <div className="text-[9px] uppercase tracking-widest text-text-mute">{label}</div>
+      <div className={`text-lg ${warn ? 'text-amber' : 'text-text'}`}>{value ?? '—'}</div>
+    </div>
+  );
+}
+
+function FindingRow({ finding, onFix, fixing }) {
+  const sev = finding.severity;
+  const colors = sev === 'error'
+    ? { border: 'border-red/40', bg: 'bg-red/5', icon: 'text-red', Icon: XCircle }
+    : sev === 'warn'
+    ? { border: 'border-amber/40', bg: 'bg-amber/5', icon: 'text-amber', Icon: AlertCircle }
+    : { border: 'border-cyan/30', bg: 'bg-cyan/5', icon: 'text-cyan', Icon: AlertCircle };
+  const Icon = colors.Icon;
+
+  return (
+    <div className={`border ${colors.border} ${colors.bg} rounded-sm p-3 flex items-start gap-3`}>
+      <Icon size={14} className={`shrink-0 mt-0.5 ${colors.icon}`} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-semibold">{finding.title}</span>
+          <span className="text-[9px] font-mono uppercase tracking-wider text-text-mute">{finding.category}</span>
+        </div>
+        <div className="text-xs text-text-dim mt-1 leading-relaxed">{finding.description}</div>
+        {finding.detail && (
+          <div className="text-[10px] font-mono text-text-mute mt-1">{finding.detail}</div>
+        )}
+      </div>
+      {finding.fix_action && (
+        <button
+          onClick={onFix}
+          disabled={fixing}
+          className="btn btn-ghost text-xs shrink-0"
+        >
+          <Wrench size={11} /> {fixing ? 'Fixing…' : finding.fix_label || 'Fix'}
+        </button>
+      )}
     </div>
   );
 }
