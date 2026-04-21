@@ -189,4 +189,25 @@
 /* Prevent horizontal scroll from any rogue wide element on mobile */
 @media (max-width: 767px) {
   body { overflow-x: hidden; }
+  html { overflow-x: hidden; }
+
+  /* Display font with big letter-spacing can clip first/last chars in a
+     narrow container. Force a safe kerning + wrapping behaviour on phones. */
+  main .text-display {
+    letter-spacing: 0 !important;
+    overflow-wrap: break-word;
+    word-break: normal;
+    hyphens: manual;
+  }
+
+  /* Kickers (all-caps mono strings with tracking) — clamp so they don't
+     overflow and become truncated mid-character. */
+  main .text-mono.uppercase {
+    letter-spacing: 0.15em !important;
+    overflow-wrap: break-word;
+    word-break: normal;
+  }
 }
+
+/* Arbitrary util used in PageHeader */
+.overflow-wrap-anywhere { overflow-wrap: anywhere; }
