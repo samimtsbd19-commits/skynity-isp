@@ -19,6 +19,7 @@ import monitoringRouter from './monitoring.js';
 import offersRouter from './offers.js';
 import suspensionsRouter from './suspensions.js';
 import bandwidthRouter from './bandwidth.js';
+import pushRouter from './push.js';
 import { sendExpiryReminders } from '../jobs/scheduler.js';
 import { bandwidthDaily } from '../services/bandwidth.js';
 import { renderInvoiceForOrder } from '../services/invoice.js';
@@ -40,6 +41,7 @@ router.use('/monitoring',        monitoringRouter);
 router.use('/offers',            offersRouter);
 router.use('/suspensions',       suspensionsRouter);
 router.use('/bandwidth',         bandwidthRouter);
+router.use('/push',              pushRouter);
 
 // ------------------------------------------------------------
 // Manual "run now" for the expiry-reminder job. Handy right

@@ -265,11 +265,12 @@ function Landing() {
         </div>
       )}
 
-      {/* Top promo row — free trial + PWA install */}
-      {(flags.free_trial || flags.pwa_install) && (
+      {/* Top promo row — free trial + PWA install + app download */}
+      {(flags.free_trial || flags.pwa_install || apps.android_url || apps.ios_url) && (
         <div style={{ marginBottom: 20, display: 'grid', gap: 10 }}>
           {flags.free_trial && <TrialBanner color={color} />}
           {flags.pwa_install && <InstallBanner />}
+          {(apps.android_url || apps.ios_url) && <AppDownloadBanner apps={apps} color={color} />}
         </div>
       )}
 
@@ -533,6 +534,51 @@ function TrialBanner({ color }) {
         <div style={{ color, fontWeight: 700 }}>Start →</div>
       </div>
     </button>
+  );
+}
+
+function AppDownloadBanner({ apps, color }) {
+  return (
+    <div
+      className="card"
+      style={{
+        background: `linear-gradient(135deg, ${color}18, transparent)`,
+        border: `1px solid ${color}44`,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 28 }}>📱</div>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>Get the mobile app</div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+            Manage your plan, see live speed, and get instant offer alerts.
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {apps.android_url && (
+            <a
+              href={apps.android_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn"
+              style={{ background: color, color: '#111', fontWeight: 600 }}
+            >
+              Android ↓
+            </a>
+          )}
+          {apps.ios_url && (
+            <a
+              href={apps.ios_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-ghost"
+            >
+              iOS ↓
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1749,6 +1795,18 @@ function AccountDashboard({ token, onLogout, branding, color }) {
     t = setInterval(tick, 30_000);
     return () => { if (t) clearInterval(t); };
   }, [authApi]);
+
+  // Register for push notifications once the customer is logged
+  // in. Ignored on older browsers / when push is disabled. The
+  // user sees the native permission prompt only on first login.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    import('../services/push.js')
+      .then(({ registerPush }) => { if (!cancelled) return registerPush(); })
+      .catch(() => null);
+    return () => { cancelled = true; };
+  }, [token]);
 
   if (!data) return <Layout branding={branding}><div className="muted" style={{ textAlign: 'center' }}>{err || 'Loading…'}</div></Layout>;
 

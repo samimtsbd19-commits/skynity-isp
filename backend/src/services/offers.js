@@ -21,6 +21,7 @@ import db from '../database/pool.js';
 import logger from '../utils/logger.js';
 import { getSetting } from './settings.js';
 import notifier from './notifier.js';
+import push from './push.js';
 
 /* ------------------------------------------------------------
    CRUD
@@ -221,6 +222,32 @@ export async function broadcastOffer(offerId, { adminId, channels, includeInacti
       WHERE id = ?`,
     [Array.isArray(channels) ? channels.join(',') : (channels || 'auto'), results.sent, offer.id]
   );
+
+  // Fan out to mobile / web push as well. Silent no-op when push
+  // is disabled or no tokens are registered.
+  try {
+    const pushResult = await push.sendToAll(
+      {
+        title: offer.title,
+        body: (offer.description || '').slice(0, 120) || 'New offer available',
+        data: {
+          kind: 'offer',
+          offer_id: String(offer.id),
+          package_id: offer.featured_package_id ? String(offer.featured_package_id) : '',
+          portal_url: portalUrl || '',
+        },
+      },
+      // Limit push to customers in the same audience
+      offer.audience === 'active'
+        ? 'customer_id IN (SELECT DISTINCT customer_id FROM subscriptions WHERE status = \'active\')'
+        : offer.audience === 'expired'
+          ? 'customer_id IN (SELECT DISTINCT customer_id FROM subscriptions WHERE status IN (\'expired\',\'suspended\'))'
+          : ''
+    );
+    results.push = pushResult;
+  } catch (err) {
+    logger.warn({ err: err.message, offerId: offer.id }, 'offer push broadcast failed');
+  }
 
   logger.info({ offerId: offer.id, ...results }, 'offer broadcast complete');
   return results;

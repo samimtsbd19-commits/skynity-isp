@@ -281,6 +281,22 @@ export const apiStaticIpAssign           = (subscriptionId, ip) =>
 export const apiStaticIpClear            = (subscriptionId) =>
   api.delete(`/suspensions/subscriptions/${subscriptionId}/static-ip`).then((r) => r.data);
 
+// ---------- VPN per-subscription routing ----------------------
+export const apiTunnels                  = (routerId) =>
+  api.get('/vpn/tunnels', { params: routerId ? { router_id: routerId } : {} }).then((r) => r.data.tunnels);
+export const apiAssignSubTunnel          = (subscriptionId, tunnelId) =>
+  api.post(`/suspensions/subscriptions/${subscriptionId}/tunnel`, { tunnel_id: tunnelId }).then((r) => r.data);
+export const apiClearSubTunnel           = (subscriptionId) =>
+  api.delete(`/suspensions/subscriptions/${subscriptionId}/tunnel`).then((r) => r.data);
+
+// ---------- Mobile app push -----------------------------------
+export const apiPushRegister             = (payload) =>
+  api.post('/push/register', payload).then((r) => r.data);
+export const apiPushUnregister           = (token) =>
+  api.post('/push/unregister', { token }).then((r) => r.data);
+export const apiPushTestSend             = (payload) =>
+  api.post('/push/test', payload).then((r) => r.data);
+
 // ---------- Bandwidth capacity / load balance ------------------
 export const apiBandwidthOverview        = (routerId) =>
   api.get('/bandwidth/overview', { params: { router_id: routerId } }).then((r) => r.data);

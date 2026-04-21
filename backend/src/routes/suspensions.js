@@ -5,6 +5,7 @@ import { Router } from 'express';
 import { requireAdmin } from '../middleware/auth.js';
 import suspensions from '../services/suspensions.js';
 import staticIpService from '../services/staticIp.js';
+import tunnelRouting from '../services/tunnelRouting.js';
 import db from '../database/pool.js';
 
 const router = Router();
@@ -86,6 +87,25 @@ router.post('/subscriptions/:id/static-ip', async (req, res) => {
 router.delete('/subscriptions/:id/static-ip', async (req, res) => {
   try {
     const out = await staticIpService.clearStaticIp(Number(req.params.id));
+    res.json(out);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// ---- VPN tunnel routing per subscription -------------------------
+// POST /suspensions/subscriptions/:id/tunnel  { tunnel_id }
+// DELETE /suspensions/subscriptions/:id/tunnel
+router.post('/subscriptions/:id/tunnel', async (req, res) => {
+  try {
+    const out = await tunnelRouting.assignTunnel(
+      Number(req.params.id),
+      Number(req.body?.tunnel_id)
+    );
+    res.json(out);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+router.delete('/subscriptions/:id/tunnel', async (req, res) => {
+  try {
+    const out = await tunnelRouting.clearTunnel(Number(req.params.id));
     res.json(out);
   } catch (err) { res.status(400).json({ error: err.message }); }
 });

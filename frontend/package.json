@@ -6,7 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0 --port 4173"
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "cap:install": "npm i -D @capacitor/cli @capacitor/core @capacitor/android @capacitor/ios @capacitor/push-notifications @capacitor/app",
+    "cap:init": "npx cap init Skynity org.skynity.isp --web-dir=dist",
+    "cap:add-android": "npx cap add android",
+    "cap:add-ios": "npx cap add ios",
+    "cap:sync": "npm run build && npx cap sync",
+    "cap:open-android": "npx cap open android",
+    "cap:open-ios": "npx cap open ios",
+    "cap:run-android": "npm run build && npx cap sync android && npx cap run android"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.20",

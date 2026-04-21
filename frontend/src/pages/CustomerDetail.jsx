@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, Phone, Mail, MessageCircle, Calendar, Key, Copy, Send,
-  Ban, ShieldCheck, Globe, Clock, X,
+  Ban, ShieldCheck, Globe, Clock, X, Network,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import {
@@ -11,6 +11,7 @@ import {
   apiSubscriptionBandwidth,
   apiSuspensionsByCustomer, apiSuspensionApply, apiSuspensionLift,
   apiStaticIpAssign, apiStaticIpClear,
+  apiTunnels, apiAssignSubTunnel, apiClearSubTunnel,
 } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
 import { StatusPill, Skeleton } from '../components/primitives';
@@ -181,6 +182,7 @@ function SubscriptionCard({ sub }) {
         <CredentialRow icon={Key} label="Username" value={sub.login_username} />
         <CredentialRow icon={Key} label="Password" value={sub.login_password} />
         {sub.service_type === 'pppoe' && <StaticIpRow sub={sub} />}
+        {sub.service_type === 'pppoe' && <TunnelRow sub={sub} /> }
       </div>
 
       <div className="text-right">
@@ -349,6 +351,85 @@ function StaticIpRow({ sub }) {
       <button className="text-text-mute hover:text-amber text-[10px] font-mono uppercase"
               onClick={() => setEditing(true)}>
         {sub.static_ip ? 'Edit' : 'Assign'}
+      </button>
+    </div>
+  );
+}
+
+// ============================================================
+// VPN tunnel selector — route the subscription's traffic via a
+// specific WireGuard / L2TP tunnel. Requires a static IP first
+// (the backend uses it as the src-address match).
+// ============================================================
+function TunnelRow({ sub }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState(null);
+  const [value, setValue] = useState(sub.tunnel_id || '');
+
+  const tunnelsQ = useQuery({
+    queryKey: ['tunnels', sub.router_id],
+    queryFn: () => apiTunnels(sub.router_id),
+    enabled: editing,
+  });
+
+  const save = useMutation({
+    mutationFn: async (tid) => {
+      if (!tid) return apiClearSubTunnel(sub.id);
+      return apiAssignSubTunnel(sub.id, Number(tid));
+    },
+    onSuccess: () => {
+      setError(null); setEditing(false);
+      qc.invalidateQueries({ queryKey: ['customer'] });
+    },
+    onError: (e) => setError(e?.response?.data?.error || e.message),
+  });
+
+  if (editing) {
+    const tunnels = tunnelsQ.data || [];
+    return (
+      <div className="flex items-center gap-2 bg-surface2 px-2.5 py-1.5 rounded-sm">
+        <Network size={12} className="text-text-mute" />
+        <span className="text-[10px] text-text-mute uppercase font-mono tracking-wider w-16">VPN</span>
+        <select
+          className="input input-sm flex-1 font-mono"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+        >
+          <option value="">— none (default route) —</option>
+          {tunnels.filter((t) => t.is_enabled).map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name} · {t.kind}{t.client_gateway ? ` → ${t.client_gateway}` : ''}
+            </option>
+          ))}
+        </select>
+        <button className="btn btn-primary btn-sm" disabled={save.isPending}
+                onClick={() => save.mutate(value)}>
+          Save
+        </button>
+        <button className="btn btn-ghost btn-sm" onClick={() => { setEditing(false); setValue(sub.tunnel_id || ''); setError(null); }}>
+          <X size={12} />
+        </button>
+        {error && <div className="text-[10px] text-red font-mono ml-1">{error}</div>}
+      </div>
+    );
+  }
+
+  const activeLabel = sub.tunnel_id
+    ? <code className="text-amber">via tunnel #{sub.tunnel_id}</code>
+    : <span className="text-text-mute italic">— default route —</span>;
+
+  return (
+    <div className="flex items-center gap-2 bg-surface2 px-2.5 py-1.5 rounded-sm group">
+      <Network size={12} className="text-text-mute" />
+      <span className="text-[10px] text-text-mute uppercase font-mono tracking-wider w-16">VPN</span>
+      <code className="flex-1 text-sm font-mono truncate">{activeLabel}</code>
+      <button
+        className="text-text-mute hover:text-amber text-[10px] font-mono uppercase"
+        onClick={() => setEditing(true)}
+        title={!sub.static_ip ? 'Assign a static IP first' : ''}
+      >
+        {sub.tunnel_id ? 'Change' : 'Assign'}
       </button>
     </div>
   );

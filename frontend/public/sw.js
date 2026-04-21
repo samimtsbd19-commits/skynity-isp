@@ -57,3 +57,40 @@ self.addEventListener('fetch', (event) => {
     )
   );
 });
+
+// ------------------------------------------------------------
+// Web push (FCM sends the same payload shape for data+notification)
+// Shows the OS notification and reopens the portal on click.
+// ------------------------------------------------------------
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try { payload = event.data ? event.data.json() : {}; } catch { /* plain text */ }
+  const notif = payload.notification || {};
+  const data  = payload.data || {};
+  const title = notif.title || data.title || 'Skynity';
+  const body  = notif.body  || data.body  || '';
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: '/favicon.svg',
+      badge: '/favicon.svg',
+      data,
+      tag: data.kind || 'skynity',
+      renotify: true,
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = event.notification.data?.portal_url
+    || event.notification.data?.renew_url
+    || '/portal';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      const hit = list.find((w) => w.url.includes('/portal'));
+      if (hit) { hit.focus(); hit.navigate(url); return; }
+      return self.clients.openWindow(url);
+    })
+  );
+});

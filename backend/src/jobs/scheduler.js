@@ -15,6 +15,7 @@ import notifier from '../services/notifier.js';
 import monitoring from '../services/monitoring.js';
 import health from '../services/health.js';
 import suspensions from '../services/suspensions.js';
+import push from '../services/push.js';
 import logger from '../utils/logger.js';
 
 async function retryUnsyncedSubs() {
@@ -285,6 +286,14 @@ async function sendExpiryReminders() {
         [daysLeft, sub.id]
       );
       logger.info({ subscriptionId: sub.id, daysLeft, channel: out.channel, ok: out.ok }, 'expiry reminder');
+
+      // Fire-and-forget push notification too, if the customer
+      // has the mobile app installed.
+      push.sendToCustomer(sub.customer_id, {
+        title: `Your ${siteName} plan expires ${urgency}`,
+        body: `${sub.package_name} · tap to renew`,
+        data: { kind: 'expiry', subscription_id: String(sub.id), renew_url: renewUrl },
+      }).catch(() => null);
     } catch (err) {
       logger.warn({ err: err.message, subscriptionId: sub.id }, 'expiry reminder failed');
     }
