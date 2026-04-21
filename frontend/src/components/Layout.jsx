@@ -44,6 +44,7 @@ const GROUPS = [
     key: 'network',
     label: 'nav.network',
     items: [
+      { to: '/live-monitor',    label: 'Live Monitor',      icon: Activity },
       { to: '/health',          label: 'nav.health',        icon: HeartPulse, badge: 'health' },
       { to: '/security',       label: 'nav.security',      icon: ShieldAlert },
       { to: '/router-monitor',  label: 'nav.routerMonitor', icon: Gauge },

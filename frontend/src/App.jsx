@@ -33,6 +33,7 @@ import Hotspot from './pages/Hotspot';
 import HotspotTemplate from './pages/HotspotTemplate';
 import ProjectGuide from './pages/ProjectGuide';
 import Diagnostics from './pages/Diagnostics';
+import LiveMonitor from './pages/LiveMonitor';
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -98,6 +99,7 @@ export default function App() {
               <Route path="settings" element={<Settings />} />
               <Route path="guide" element={<ProjectGuide />} />
               <Route path="diagnostics" element={<Diagnostics />} />
+              <Route path="live-monitor" element={<LiveMonitor />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

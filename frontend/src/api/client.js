@@ -411,6 +411,7 @@ export const apiDiagTelegramRestart= () => api.post('/diagnostics/telegram/resta
 export const apiDiagAiTest         = () => api.post('/diagnostics/ai/test').then((r) => r.data);
 export const apiDiagMikrotikTest   = (rid) => api.post(`/diagnostics/mikrotik/test${rid ? '/' + rid : ''}`).then((r) => r.data);
 export const apiDiagMikrotikLive   = (rid) => api.get(`/diagnostics/mikrotik/live${rid ? '/' + rid : ''}`).then((r) => r.data);
+export const apiLiveDashboard      = (rid) => api.get(`/diagnostics/mikrotik/dashboard${rid ? '/' + rid : ''}`).then((r) => r.data);
 
 export const apiHotspotLogoUpload       = (file) => {
   const fd = new FormData();
