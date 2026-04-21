@@ -4,7 +4,7 @@ import {
   Activity, Router as RouterIcon, LogOut, Satellite,
   ScrollText, Settings, FileCode, Shield, Terminal,
   RefreshCw, UserCog, Cog, Ticket, ChevronDown, UserCheck,
-  HeartPulse, Globe, Megaphone, Gauge, Ban, TrendingUp,
+  HeartPulse, Globe, Megaphone, Gauge, Ban, TrendingUp, ShieldAlert,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
@@ -43,6 +43,7 @@ const GROUPS = [
     label: 'nav.network',
     items: [
       { to: '/health',          label: 'nav.health',        icon: HeartPulse, badge: 'health' },
+      { to: '/security',       label: 'nav.security',      icon: ShieldAlert },
       { to: '/router-monitor',  label: 'nav.routerMonitor', icon: Gauge },
       { to: '/bandwidth',       label: 'nav.bandwidth',     icon: TrendingUp },
       { to: '/monitoring',      label: 'nav.liveSessions',  icon: Radio },

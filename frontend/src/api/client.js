@@ -314,6 +314,16 @@ export const apiEventsSummary   = () => api.get('/monitoring/events/summary').th
 export const apiResolveEvent    = (id) => api.post(`/monitoring/events/${id}/resolve`).then((r) => r.data);
 export const apiRunHealthChecks = () => api.post('/monitoring/events/run-checks').then((r) => r.data);
 
+// ---------- Security audit + emergency stop --------------------
+export const apiSecuritySummary = (hours = 168) =>
+  api.get('/security/summary', { params: { hours } }).then((r) => r.data);
+export const apiSecurityEvents = (params = {}) =>
+  api.get('/security/events', { params }).then((r) => r.data.events);
+export const apiSecurityEmergencyGet = () =>
+  api.get('/security/emergency-stop').then((r) => r.data);
+export const apiSecurityEmergencySet = (enabled) =>
+  api.post('/security/emergency-stop', { enabled }).then((r) => r.data);
+
 // ---------- Notifications ----------
 export const apiNotifyChannels = () =>
   api.get('/notify/channels').then((r) => r.data.channels);

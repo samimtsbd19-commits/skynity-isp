@@ -24,6 +24,7 @@ import Admins from './pages/Admins';
 import Vouchers from './pages/Vouchers';
 import CustomerAccounts from './pages/CustomerAccounts';
 import Health from './pages/Health';
+import Security from './pages/Security';
 import Offers from './pages/Offers';
 import Suspensions from './pages/Suspensions';
 import Bandwidth from './pages/Bandwidth';
@@ -74,6 +75,7 @@ export default function App() {
               <Route path="monitoring" element={<Monitoring />} />
               <Route path="router-monitor" element={<RouterMonitor />} />
               <Route path="health" element={<Health />} />
+              <Route path="security" element={<Security />} />
               <Route path="packages" element={<Packages />} />
               <Route path="vouchers" element={<Vouchers />} />
               <Route path="offers" element={<Offers />} />

@@ -18,6 +18,13 @@ import {
   rejectOrder,
 } from '../services/provisioning.js';
 import { registerAdminCommands, handleAdminGuidedFlow } from './admin-commands.js';
+import ops from '../services/ops.js';
+import { attachBot } from './poll-control.js';
+import {
+  registerClaudeAi,
+  handleAiChatMessage,
+  registerSettingShortcut,
+} from './claude-commands.js';
 
 const { TELEGRAM_BOT_TOKEN, TELEGRAM_ADMIN_IDS, BKASH_NUMBER, NAGAD_NUMBER, CURRENCY_SYMBOL, UPLOAD_DIR } = config;
 
@@ -98,7 +105,8 @@ bot.onText(/^\/start$/, async (msg) => {
   if (isAdmin(msg.from.id)) {
     await bot.sendMessage(
       chatId,
-      '👑 Admin commands:\n/pending — view pending orders\n/stats — quick stats\n/customers — recent customers',
+      '👑 *Admin*\n/pending /stats /customers /ai /models /emergency_on · off\n'
+      + '`/setsetting key value` — quick setting toggle',
       { parse_mode: 'Markdown' }
     );
   }
@@ -135,6 +143,9 @@ bot.onText(/^(💬 Support)$/, async (msg) => {
 // Buy Package flow
 // ============================================================
 bot.onText(/^(🛒 Buy Package|\/buy)$/, async (msg) => {
+  if (!isAdmin(msg.from.id) && (await ops.getEmergencyStop())) {
+    return bot.sendMessage(msg.chat.id, '⏳ System maintenance — please try again later.');
+  }
   const chatId = msg.chat.id;
   const pkgs = await db.query(
     `SELECT * FROM packages WHERE is_active = 1 ORDER BY service_type, sort_order, price`
@@ -175,6 +186,10 @@ bot.on('callback_query', async (cq) => {
   const tgId = cq.from.id;
 
   try {
+    if (!isAdmin(tgId) && (await ops.getEmergencyStop())) {
+      return bot.answerCallbackQuery(cq.id, { text: 'Maintenance — try later', show_alert: true });
+    }
+
     // --- package selection ---
     if (data.startsWith('pkg:')) {
       const pkgId = Number(data.split(':')[1]);
@@ -266,6 +281,18 @@ bot.on('message', async (msg) => {
   const tgId = msg.from.id;
   const chatId = msg.chat.id;
   const session = await getSession(tgId);
+
+  // Claude AI multi-turn (admin) — before other guided flows
+  if (isAdmin(tgId)) {
+    if (await handleAiChatMessage(bot, msg, session, { setSession, isAdmin })) {
+      return;
+    }
+  }
+
+  // Background work paused — block customer flows only
+  if (!isAdmin(tgId) && (await ops.getEmergencyStop())) {
+    return bot.sendMessage(chatId, '⏳ System maintenance — please try again in a few minutes.');
+  }
 
   // Admin-guided multi-step flows (addrouter, addpkg) — handled first
   if (await handleAdminGuidedFlow(bot, msg, session, { isAdmin, setSession, clearSession, CURRENCY_SYMBOL })) {
@@ -534,8 +561,12 @@ export function startBot() {
     return null;
   }
 
+  attachBot(bot);
+
   // Register all admin commands
   registerAdminCommands(bot, { isAdmin, setSession, getSession, clearSession, CURRENCY_SYMBOL });
+  registerClaudeAi(bot, { isAdmin, setSession, clearSession });
+  registerSettingShortcut(bot, { isAdmin });
 
   bot.on('polling_error', (err) => logger.error({ err: err.message }, 'polling error'));
 

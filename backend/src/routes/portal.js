@@ -48,6 +48,7 @@ import bcrypt from 'bcrypt';
 import { signCustomerToken, requireCustomer } from '../middleware/auth.js';
 import { bandwidthDaily, getCustomerShareView } from '../services/bandwidth.js';
 import offersService from '../services/offers.js';
+import security from '../services/security.js';
 
 const router = Router();
 
@@ -542,7 +543,17 @@ router.post('/customer/login', postLimiter, async (req, res) => {
       `SELECT o.* FROM orders o WHERE o.order_code = ? AND o.phone = ?`,
       [orderCode, phone]
     );
-    if (!order) return res.status(404).json({ error: 'no match — check phone and order code' });
+    if (!order) {
+      await security.logSecurityEvent({
+        eventType: 'portal_customer_login_fail',
+        severity: 'info',
+        ip: clientIp(req),
+        userAgent: String(req.headers['user-agent'] || '').slice(0, 512),
+        subject: phone,
+        meta: { order_code: orderCode, reason: 'no_match' },
+      });
+      return res.status(404).json({ error: 'no match — check phone and order code' });
+    }
 
     const customer = order.customer_id
       ? await db.queryOne('SELECT id, full_name, phone, customer_code FROM customers WHERE id = ?', [order.customer_id])
@@ -560,6 +571,15 @@ router.post('/customer/login', postLimiter, async (req, res) => {
           [customer.id]
         )
       : [];
+
+    await security.logSecurityEvent({
+      eventType: 'portal_customer_login_ok',
+      severity: 'info',
+      ip: clientIp(req),
+      userAgent: String(req.headers['user-agent'] || '').slice(0, 512),
+      subject: phone,
+      meta: { order_code: orderCode, customer_id: customer?.id || null },
+    });
 
     res.json({
       ok: true,
@@ -729,7 +749,26 @@ router.post('/otp/verify', postLimiter, async (req, res) => {
     const code = String(req.body?.code || '').trim();
     if (!phone || !code) return res.status(400).json({ error: 'phone and code required' });
     const out = await otp.verifyOtp({ phone, code, purpose: 'login' });
-    if (!out.ok) return res.status(400).json(out);
+    if (!out.ok) {
+      await security.logSecurityEvent({
+        eventType: 'otp_verify_fail',
+        severity: 'warning',
+        ip: clientIp(req),
+        userAgent: String(req.headers['user-agent'] || '').slice(0, 512),
+        subject: phone,
+        meta: { error: out.error || 'verify_failed' },
+      });
+      return res.status(400).json(out);
+    }
+
+    await security.logSecurityEvent({
+      eventType: 'otp_verify_ok',
+      severity: 'info',
+      ip: clientIp(req),
+      userAgent: String(req.headers['user-agent'] || '').slice(0, 512),
+      subject: phone,
+      meta: { customer_id: out.customer?.id || null },
+    });
 
     // Shape the response the same way as /customer/login so the
     // portal can reuse its "Welcome back" component unchanged.

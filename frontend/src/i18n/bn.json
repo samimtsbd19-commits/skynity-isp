@@ -38,6 +38,7 @@
   "nav.routerMonitor": "রাউটার মনিটর",
   "nav.bandwidth": "ব্যান্ডউইথ",
   "nav.health": "হেলথ ও অ্যালার্ট",
+  "nav.security": "সিকিউরিটি",
   "nav.configs": "কনফিগ",
   "nav.settings": "সেটিংস",
   "nav.audit": "অডিট লগ",
@@ -63,6 +64,13 @@
   "health.firstSeen": "প্রথম দেখা",
   "health.lastSeen": "সর্বশেষ",
   "health.occurrences": "দেখা হয়েছে {n}×",
+
+  "security.subtitle": "লগইন অডিট, অপব্যবহার সতর্কতা, এবং ব্যাকগ্রাউন্ড জব জরুরি বন্ধ।",
+  "security.recent": "সাম্প্রতিক ইভেন্ট (৭ দিন)",
+  "security.signals.adminFail": "অ্যাডমিন লগইন ব্যর্থ (২৪ঘ)",
+  "security.signals.otpFail": "OTP ভেরিফাই ব্যর্থ (২৪ঘ)",
+  "security.signals.portalFail": "পোর্টাল লগইন ব্যর্থ (২৪ঘ)",
+  "security.signals.total24": "মোট ইভেন্ট (২৪ঘ)",
 
   "monitor.title": "রাউটার মনিটরিং",
   "monitor.subtitle": "প্রতিটি সক্রিয় রাউটার থেকে লাইভ CPU, RAM, তাপমাত্রা, SFP, ও ping মেট্রিক্স।",

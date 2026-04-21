@@ -16,7 +16,17 @@ import monitoring from '../services/monitoring.js';
 import health from '../services/health.js';
 import suspensions from '../services/suspensions.js';
 import push from '../services/push.js';
+import ops from '../services/ops.js';
+import security from '../services/security.js';
 import logger from '../utils/logger.js';
+
+async function guard(name, fn) {
+  if (await ops.getEmergencyStop()) {
+    logger.debug({ name }, 'cron skipped — emergency stop');
+    return;
+  }
+  return fn();
+}
 
 async function retryUnsyncedSubs() {
   const subs = await db.query(
@@ -301,36 +311,41 @@ async function sendExpiryReminders() {
 }
 
 export function startJobs() {
-  cron.schedule('*/5 * * * *',  () => retryUnsyncedSubs().catch((e) => logger.error({ e }, 'retry job')));
-  cron.schedule('*/15 * * * *', () => expireDueSubs().catch((e) => logger.error({ e }, 'expire job')));
+  cron.schedule('*/5 * * * *',  () => guard('retryUnsyncedSubs', () => retryUnsyncedSubs()).catch((e) => logger.error({ e }, 'retry job')));
+  cron.schedule('*/15 * * * *', () => guard('expireDueSubs', () => expireDueSubs()).catch((e) => logger.error({ e }, 'expire job')));
   // Every 10 min: refresh last-seen AND snapshot bandwidth usage
   // for every active PPPoE/Hotspot session. Tighter than the old
   // hourly tick so daily usage charts have enough resolution.
-  cron.schedule('*/10 * * * *', () => refreshLastSeen().catch((e) => logger.error({ e }, 'monitor job')));
+  cron.schedule('*/10 * * * *', () => guard('refreshLastSeen', () => refreshLastSeen()).catch((e) => logger.error({ e }, 'monitor job')));
   // Once a day — 08:00 local (TZ comes from the container / env).
-  cron.schedule('0 8 * * *',    () => sendExpiryReminders().catch((e) => logger.error({ e }, 'expiry reminder job')));
+  cron.schedule('0 8 * * *',    () => guard('sendExpiryReminders', () => sendExpiryReminders()).catch((e) => logger.error({ e }, 'expiry reminder job')));
   // Overnight: drop snapshots older than the retention window.
-  cron.schedule('30 3 * * *',   () => pruneUsageSnapshots());
+  cron.schedule('30 3 * * *',   () => guard('pruneUsageSnapshots', () => pruneUsageSnapshots()));
 
   // -------- Monitoring + health --------
   // Every 5 min: poll all routers for CPU/RAM/iface/ping/neighbors.
-  cron.schedule('*/5 * * * *',  () => monitoring.pollAllRouters().catch((e) => logger.error({ e }, 'monitoring poll')));
+  cron.schedule('*/5 * * * *',  () => guard('pollAllRouters', () => monitoring.pollAllRouters()).catch((e) => logger.error({ e }, 'monitoring poll')));
   // Every 5 min: run issue-detector rules against the fresh data.
-  cron.schedule('*/5 * * * *',  () => health.runHealthChecks().catch((e) => logger.error({ e }, 'health checks')));
+  cron.schedule('*/5 * * * *',  () => guard('runHealthChecks', () => health.runHealthChecks()).catch((e) => logger.error({ e }, 'health checks')));
   // Once a day at 04:00: refresh static device info (firmware / license).
   cron.schedule('0 4 * * *',    async () => {
+    if (await ops.getEmergencyStop()) return;
     try {
       const routers = await db.query('SELECT id, name FROM mikrotik_routers WHERE is_active = 1');
       for (const r of routers) await monitoring.refreshDeviceInfo(r);
     } catch (e) { logger.error({ e }, 'device info refresh'); }
   });
   // Overnight: drop metrics older than the retention window.
-  cron.schedule('45 3 * * *',   () => monitoring.pruneMetrics());
+  cron.schedule('45 3 * * *',   () => guard('pruneMetrics', () => monitoring.pruneMetrics()));
 
   // Every minute: lift any temporary suspensions whose timer has
   // elapsed. Cheap query — no routers hit unless there's work.
-  cron.schedule('* * * * *',    () => suspensions.liftExpired()
+  cron.schedule('* * * * *',    () => guard('liftExpired', () => suspensions.liftExpired())
     .catch((e) => logger.error({ e }, 'suspension auto-lift')));
+
+  // Weekly: trim old security audit rows
+  cron.schedule('15 4 * * 0',   () => guard('securityPrune', () => security.pruneOld(90))
+    .catch((e) => logger.error({ e }, 'security prune')));
 
   logger.info('cron jobs scheduled');
 }

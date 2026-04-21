@@ -20,11 +20,19 @@ import offersRouter from './offers.js';
 import suspensionsRouter from './suspensions.js';
 import bandwidthRouter from './bandwidth.js';
 import pushRouter from './push.js';
+import securityRouter from './security.js';
 import { sendExpiryReminders } from '../jobs/scheduler.js';
 import { bandwidthDaily } from '../services/bandwidth.js';
 import { renderInvoiceForOrder } from '../services/invoice.js';
+import security from '../services/security.js';
 
 const router = Router();
+
+function clientIp(req) {
+  const xf = req.headers['x-forwarded-for'];
+  if (xf) return String(xf).split(',')[0].trim().slice(0, 45);
+  return String(req.ip || req.socket?.remoteAddress || '').slice(0, 45) || null;
+}
 
 // ---------- sub-routers (Phase 4 modules) ----------
 router.use('/configs',  configsRouter);
@@ -42,6 +50,7 @@ router.use('/offers',            offersRouter);
 router.use('/suspensions',       suspensionsRouter);
 router.use('/bandwidth',         bandwidthRouter);
 router.use('/push',              pushRouter);
+router.use('/security',          securityRouter);
 
 // ------------------------------------------------------------
 // Manual "run now" for the expiry-reminder job. Handy right
@@ -78,17 +87,45 @@ function routerIdFromQuery(q) {
 router.post('/auth/login', async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'username/password required' });
+  const ip = clientIp(req);
+  const ua = String(req.headers['user-agent'] || '').slice(0, 512);
 
   const admin = await db.queryOne(
     'SELECT * FROM admins WHERE username = ? AND is_active = 1',
     [username]
   );
-  if (!admin) return res.status(401).json({ error: 'invalid credentials' });
+  if (!admin) {
+    await security.logSecurityEvent({
+      eventType: 'admin_login_fail',
+      severity: 'warning',
+      ip, userAgent: ua,
+      subject: String(username).slice(0, 255),
+      meta: { reason: 'no_such_user' },
+    });
+    return res.status(401).json({ error: 'invalid credentials' });
+  }
 
   const ok = await bcrypt.compare(password, admin.password_hash);
-  if (!ok) return res.status(401).json({ error: 'invalid credentials' });
+  if (!ok) {
+    await security.logSecurityEvent({
+      eventType: 'admin_login_fail',
+      severity: 'warning',
+      ip, userAgent: ua,
+      adminId: admin.id,
+      subject: username,
+      meta: { reason: 'bad_password' },
+    });
+    return res.status(401).json({ error: 'invalid credentials' });
+  }
 
   await db.query('UPDATE admins SET last_login_at = NOW() WHERE id = ?', [admin.id]);
+  await security.logSecurityEvent({
+    eventType: 'admin_login_ok',
+    severity: 'info',
+    ip, userAgent: ua,
+    adminId: admin.id,
+    subject: username,
+  });
   const token = signAdminToken(admin);
   res.json({
     token,

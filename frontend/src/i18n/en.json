@@ -38,6 +38,7 @@
   "nav.routerMonitor": "Router monitor",
   "nav.bandwidth": "Bandwidth",
   "nav.health": "Health & alerts",
+  "nav.security": "Security",
   "nav.configs": "Configs",
   "nav.settings": "Settings",
   "nav.audit": "Audit log",
@@ -63,6 +64,13 @@
   "health.firstSeen": "first seen",
   "health.lastSeen": "last seen",
   "health.occurrences": "seen {n}×",
+
+  "security.subtitle": "Authentication audit trail, abuse signals, and emergency pause for background jobs.",
+  "security.recent": "Recent events (7 days)",
+  "security.signals.adminFail": "Admin login fails (24h)",
+  "security.signals.otpFail": "OTP verify fails (24h)",
+  "security.signals.portalFail": "Portal login fails (24h)",
+  "security.signals.total24": "All events (24h)",
 
   "monitor.title": "Router monitoring",
   "monitor.subtitle": "Live CPU, memory, temperature, SFP, and ping metrics from every active router.",
