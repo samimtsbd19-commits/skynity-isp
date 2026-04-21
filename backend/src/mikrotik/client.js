@@ -16,6 +16,38 @@ import axios from 'axios';
 import https from 'node:https';
 import logger from '../utils/logger.js';
 
+/**
+ * MikroTik formats time values with mixed units like "34ms494us" or "1s200ms".
+ * Naively stripping non-digits gives "34494" which gets read as 34494 ms —
+ * turning a 34 ms ping into an apparent 34-second latency. Parse each unit
+ * segment and sum them in milliseconds instead.
+ */
+export function parseMikrotikTimeMs(s) {
+  if (s == null) return null;
+  const str = String(s).trim();
+  if (!str) return null;
+  // Plain number → already ms
+  if (/^-?\d+(\.\d+)?$/.test(str)) return Number(str);
+
+  let total = 0;
+  let matched = false;
+  const re = /(\d+(?:\.\d+)?)(us|ms|s|m|h|d)/g;
+  let m;
+  while ((m = re.exec(str)) !== null) {
+    matched = true;
+    const n = Number(m[1]);
+    switch (m[2]) {
+      case 'us': total += n / 1000;        break;
+      case 'ms': total += n;               break;
+      case 's':  total += n * 1000;        break;
+      case 'm':  total += n * 60_000;      break;
+      case 'h':  total += n * 3_600_000;   break;
+      case 'd':  total += n * 86_400_000;  break;
+    }
+  }
+  return matched ? total : null;
+}
+
 export class MikrotikClient {
   constructor({ host, port = 443, username, password, useSsl = true, rejectUnauthorized = false }) {
     this.host = host;
@@ -103,8 +135,8 @@ export class MikrotikClient {
       const arr = Array.isArray(r) ? r : [r];
       const hits = arr.filter((x) => x && x.status !== 'timeout' && x['time'] != null);
       const times = hits
-        .map((x) => Number(String(x.time).replace(/[^\d.]/g, '')))
-        .filter((n) => !Number.isNaN(n));
+        .map((x) => parseMikrotikTimeMs(x.time))
+        .filter((n) => n != null && !Number.isNaN(n));
       const lost = Number(arr[arr.length - 1]?.['packet-loss']);
       return {
         sent: count,
