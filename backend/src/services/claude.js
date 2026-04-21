@@ -156,10 +156,11 @@ export async function chat({ userMessage, model, systemExtra = '' }) {
 /**
  * Multi-turn. `messages` = [{ role:'user'|'assistant', content }, ...] (no system — we prepend).
  */
-export async function continueChat({ messages, model }) {
+export async function continueChat({ messages, model, systemExtra = '' }) {
   if (await useOpenRouter()) {
+    const sys = [SKYNITY_CONTEXT, systemExtra].filter(Boolean).join('\n\n');
     const apiMessages = [
-      { role: 'system', content: SKYNITY_CONTEXT },
+      { role: 'system', content: sys },
       ...messages,
     ];
     return openRouterComplete({ messages: apiMessages, model });
@@ -170,7 +171,7 @@ export async function continueChat({ messages, model }) {
   const defModel = (await getSetting('ai.claude.model')) || 'claude-3-5-sonnet-20241022';
   const useModel = model || defModel;
   const mt = await maxTokens();
-  const system = SKYNITY_CONTEXT;
+  const system = [SKYNITY_CONTEXT, systemExtra].filter(Boolean).join('\n\n');
 
   const { data } = await axios.post(
     ANTHROPIC_API,

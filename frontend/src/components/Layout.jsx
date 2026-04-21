@@ -3,7 +3,7 @@ import { ErrorBoundary } from './primitives';
 import {
   LayoutDashboard, Users, Inbox, Package, Radio,
   Activity, Router as RouterIcon, LogOut, Satellite,
-  ScrollText, Settings, FileCode, Shield, Terminal,
+  ScrollText, Settings, FileCode, Shield, Terminal, Wifi,
   RefreshCw, UserCog, Cog, Ticket, ChevronDown, UserCheck,
   HeartPulse, Globe, Megaphone, Gauge, Ban, TrendingUp, ShieldAlert, Menu, X,
 } from 'lucide-react';
@@ -50,8 +50,10 @@ const GROUPS = [
       { to: '/monitoring',      label: 'nav.liveSessions',  icon: Radio },
       { to: '/packages',   label: 'nav.packages',   icon: Package },
       { to: '/routers',    label: 'nav.routers',    icon: RouterIcon },
-      { to: '/configs',    label: 'nav.configs',    icon: FileCode },
-      { to: '/vpn',        label: 'VPN',            icon: Shield },
+      { to: '/configs',         label: 'nav.configs',    icon: FileCode },
+      { to: '/hotspot',         label: 'Hotspot',        icon: Wifi },
+      { to: '/hotspot-template',label: 'Portal Template', icon: FileCode },
+      { to: '/vpn',             label: 'VPN',            icon: Shield },
       { to: '/scripts',    label: 'Scripts',        icon: Terminal },
       { to: '/updates',    label: 'Updates',        icon: RefreshCw },
     ],

@@ -371,3 +371,30 @@ export const apiRouterDelete = (id) => api.delete(`/routers-admin/${id}`).then((
 export const apiRouterTest = (id) => api.post(`/routers-admin/${id}/test`).then((r) => r.data);
 export const apiRouterTestConnection = (data) =>
   api.post('/routers-admin/test-connection', data).then((r) => r.data);
+
+// ---------- Hotspot management ----------
+function hsParams(routerId) { return routerId != null ? { params: { routerId } } : {}; }
+
+export const apiHotspotActive      = (rid) => api.get('/hotspot/active', hsParams(rid)).then((r) => r.data.active);
+export const apiHotspotKick        = (id, rid) => api.delete(`/hotspot/active/${id}`, hsParams(rid)).then((r) => r.data);
+
+export const apiHotspotUsers       = (rid) => api.get('/hotspot/users', hsParams(rid)).then((r) => r.data.users);
+export const apiHotspotUserCreate  = (data, rid) => api.post('/hotspot/users', data, hsParams(rid)).then((r) => r.data);
+export const apiHotspotUserDelete  = (id, rid) => api.delete(`/hotspot/users/${id}`, hsParams(rid)).then((r) => r.data);
+export const apiHotspotUserEnable  = (id, rid) => api.post(`/hotspot/users/${id}/enable`, {}, hsParams(rid)).then((r) => r.data);
+export const apiHotspotUserDisable = (id, rid) => api.post(`/hotspot/users/${id}/disable`, {}, hsParams(rid)).then((r) => r.data);
+
+export const apiHotspotProfiles       = (rid) => api.get('/hotspot/profiles', hsParams(rid)).then((r) => r.data.profiles);
+export const apiHotspotProfileCreate  = (data, rid) => api.post('/hotspot/profiles', data, hsParams(rid)).then((r) => r.data);
+export const apiHotspotProfileDelete  = (id, rid) => api.delete(`/hotspot/profiles/${id}`, hsParams(rid)).then((r) => r.data);
+
+export const apiHotspotHosts   = (rid) => api.get('/hotspot/hosts', hsParams(rid)).then((r) => r.data.hosts);
+export const apiHotspotLog     = (rid) => api.get('/hotspot/log', hsParams(rid)).then((r) => r.data.log);
+export const apiAppLog         = (topics, rid) => api.get('/hotspot/applog', { ...hsParams(rid), params: { ...hsParams(rid).params, topics } }).then((r) => r.data.log);
+
+export const apiHotspotServers     = (rid) => api.get('/hotspot/server', hsParams(rid)).then((r) => r.data.servers);
+export const apiHotspotServerLock  = (id, locked, rid) => api.post(`/hotspot/server/${id}/lock`, { locked }, hsParams(rid)).then((r) => r.data);
+
+export const apiHotspotTemplate       = () => api.get('/hotspot/template').then((r) => r.data);
+export const apiHotspotTemplateSave   = (template) => api.put('/hotspot/template', { template }).then((r) => r.data);
+export const apiHotspotTemplateReset  = () => api.delete('/hotspot/template').then((r) => r.data);

@@ -29,6 +29,8 @@ import Offers from './pages/Offers';
 import Suspensions from './pages/Suspensions';
 import Bandwidth from './pages/Bandwidth';
 import PublicPortal from './pages/PublicPortal';
+import Hotspot from './pages/Hotspot';
+import HotspotTemplate from './pages/HotspotTemplate';
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -83,6 +85,8 @@ export default function App() {
               <Route path="bandwidth" element={<Bandwidth />} />
               <Route path="routers" element={<Routers />} />
               <Route path="configs" element={<Configs />} />
+              <Route path="hotspot" element={<Hotspot />} />
+              <Route path="hotspot-template" element={<HotspotTemplate />} />
               <Route path="vpn" element={<Vpn />} />
               <Route path="scripts" element={<Scripts />} />
               <Route path="updates" element={<Updates />} />
