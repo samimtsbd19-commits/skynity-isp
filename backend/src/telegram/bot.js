@@ -26,6 +26,7 @@ import {
   handleAiChatMessage,
   registerSettingShortcut,
 } from './claude-commands.js';
+import { registerQuickCommands } from './quick-commands.js';
 
 const { BKASH_NUMBER, NAGAD_NUMBER, CURRENCY_SYMBOL, UPLOAD_DIR } = config;
 
@@ -621,6 +622,7 @@ function registerAllHandlers() {
   registerAdminCommands(bot, { isAdmin, setSession, getSession, clearSession, CURRENCY_SYMBOL });
   registerClaudeAi(bot, { isAdmin, setSession, clearSession });
   registerSettingShortcut(bot, { isAdmin });
+  registerQuickCommands(bot, { isAdmin });
   bot.on('polling_error', (err) => logger.error({ err: err.message }, 'polling error'));
 }
 
