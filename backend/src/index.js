@@ -20,18 +20,40 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
-// CORS: in production only allow same-origin (served behind Caddy/nginx).
-// In development allow the Vite dev server on port 5173.
-const allowedOrigins =
+// CORS: allow the configured public base URL and any of its sibling
+// subdomains (admin.*, portal.*, etc) sharing the same apex.
+// In dev, also allow Vite on :5173.
+const staticAllowed =
   config.NODE_ENV === 'production'
     ? [config.PUBLIC_BASE_URL].filter(Boolean)
-    : ['http://localhost:5173', 'http://127.0.0.1:5173'];
+    : ['http://localhost:5173', 'http://127.0.0.1:5173', config.PUBLIC_BASE_URL].filter(Boolean);
+
+// Derive the apex from PUBLIC_BASE_URL — e.g. "wifi.skynity.org" → "skynity.org".
+let APEX_DOMAIN = null;
+try {
+  const host = new URL(config.PUBLIC_BASE_URL || 'https://localhost').hostname;
+  const parts = host.split('.');
+  if (parts.length >= 2) APEX_DOMAIN = parts.slice(-2).join('.');
+} catch { /* ignore */ }
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;                    // same-origin / curl / Postman
+  if (staticAllowed.includes(origin)) return true;
+  if (!APEX_DOMAIN) return false;
+  try {
+    const u = new URL(origin);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+    const h = u.hostname;
+    // Exact apex or any subdomain of the apex
+    return h === APEX_DOMAIN || h.endsWith('.' + APEX_DOMAIN);
+  } catch {
+    return false;
+  }
+}
 
 app.use(cors({
   origin: (origin, cb) => {
-    // Allow requests with no Origin header (curl, Postman, same-origin browser)
-    if (!origin) return cb(null, true);
-    if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return cb(null, true);
+    if (isAllowedOrigin(origin)) return cb(null, true);
     cb(new Error(`CORS: origin ${origin} not allowed`));
   },
   credentials: true,
