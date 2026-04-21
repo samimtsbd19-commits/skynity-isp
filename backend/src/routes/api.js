@@ -18,6 +18,7 @@ import customerAccountsRouter from './customerAccounts.js';
 import monitoringRouter from './monitoring.js';
 import offersRouter from './offers.js';
 import suspensionsRouter from './suspensions.js';
+import bandwidthRouter from './bandwidth.js';
 import { sendExpiryReminders } from '../jobs/scheduler.js';
 import { bandwidthDaily } from '../services/bandwidth.js';
 import { renderInvoiceForOrder } from '../services/invoice.js';
@@ -38,6 +39,7 @@ router.use('/customer-accounts', customerAccountsRouter);
 router.use('/monitoring',        monitoringRouter);
 router.use('/offers',            offersRouter);
 router.use('/suspensions',       suspensionsRouter);
+router.use('/bandwidth',         bandwidthRouter);
 
 // ------------------------------------------------------------
 // Manual "run now" for the expiry-reminder job. Handy right
@@ -129,7 +131,9 @@ router.get('/activity-log', requireAdmin, async (req, res) => {
 
 router.get('/routers', requireAdmin, async (_req, res) => {
   const rows = await db.query(
-    `SELECT id, name, host, port, username, use_ssl, is_default, is_active, last_seen_at, created_at, note
+    `SELECT id, name, host, port, username, use_ssl, is_default, is_active,
+            last_seen_at, created_at, note,
+            uplink_interface, uplink_down_mbps, uplink_up_mbps
      FROM mikrotik_routers ORDER BY is_default DESC, id ASC`
   );
   res.json({ routers: rows });

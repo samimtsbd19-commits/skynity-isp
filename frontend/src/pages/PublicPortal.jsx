@@ -1735,7 +1735,20 @@ function AccountDashboard({ token, onLogout, branding, color }) {
       setErr(ex?.response?.data?.error || ex.message);
     }
   };
+
+  // Live "you're getting X Mbps right now" view, refreshed every
+  // 30 s while the page is open.
+  const [share, setShare] = useState(null);
   useEffect(() => { load(); api.get('/packages').then((r) => setInfo(r.data)).catch(() => {}); }, []);  // eslint-disable-line
+  useEffect(() => {
+    let t = null;
+    const tick = async () => {
+      try { setShare((await authApi.get('/account/share')).data); } catch { /* silent */ }
+    };
+    tick();
+    t = setInterval(tick, 30_000);
+    return () => { if (t) clearInterval(t); };
+  }, [authApi]);
 
   if (!data) return <Layout branding={branding}><div className="muted" style={{ textAlign: 'center' }}>{err || 'Loading…'}</div></Layout>;
 
@@ -1768,6 +1781,10 @@ function AccountDashboard({ token, onLogout, branding, color }) {
         </div>
       )}
 
+      {share?.enabled && share.hasSub && share.fair_share_mbps != null && (
+        <ShareBanner share={share} color={color} />
+      )}
+
       {subs.length > 0 && (
         <div className="card" style={{ marginTop: 12 }}>
           <div className="kicker">Subscriptions</div>
@@ -1783,6 +1800,52 @@ function AccountDashboard({ token, onLogout, branding, color }) {
         <Link to="/portal" className="btn btn-ghost">← Browse packages</Link>
       </div>
     </Layout>
+  );
+}
+
+// ============================================================
+// "Right now you're getting X Mbps" — shown on the customer
+// dashboard when the admin has configured uplink capacity.
+// Explains bandwidth sharing in the customer's language.
+// ============================================================
+function ShareBanner({ share, color }) {
+  const pkg   = Number(share.package_rate_mbps) || 0;
+  const fair  = Number(share.fair_share_mbps)   || 0;
+  const bonus = Number(share.bonus_mbps)        || 0;
+  const hasBonus = bonus > 0.5;
+
+  return (
+    <div
+      className="card"
+      style={{
+        marginTop: 12,
+        background: hasBonus
+          ? 'linear-gradient(135deg, rgba(16,185,129,0.15), rgba(96,165,250,0.08))'
+          : undefined,
+        borderColor: hasBonus ? 'rgba(16,185,129,0.4)' : undefined,
+      }}
+    >
+      <div className="kicker">
+        {hasBonus ? '⚡ Speed bonus right now' : 'Live speed'}
+      </div>
+      <h3 style={{ margin: '4px 0' }}>
+        {hasBonus
+          ? <>You're getting about <span style={{ color }}>{fair.toFixed(1)} Mbps</span> — {bonus.toFixed(1)} Mbps bonus!</>
+          : <>Your plan: <span style={{ color }}>{pkg} Mbps</span></>
+        }
+      </h3>
+      <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+        {hasBonus
+          ? `Only ${share.users_online} neighbor${share.users_online === 1 ? '' : 's'} online right now, so the network gives you their idle share on top of your ${pkg} Mbps plan.`
+          : `${share.users_online} user${share.users_online === 1 ? '' : 's'} online. When the network is busy you always get at least your plan speed of ${pkg} Mbps.`}
+      </p>
+      <div
+        className="muted"
+        style={{ fontSize: 11, marginTop: 6, fontFamily: 'monospace' }}
+      >
+        uplink: {share.capacity_mbps} Mbps · fair share: {fair.toFixed(1)} Mbps · plan floor: {pkg} Mbps
+      </div>
+    </div>
   );
 }
 

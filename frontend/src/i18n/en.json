@@ -36,6 +36,7 @@
   "nav.monitoring": "Monitoring",
   "nav.liveSessions": "Live sessions",
   "nav.routerMonitor": "Router monitor",
+  "nav.bandwidth": "Bandwidth",
   "nav.health": "Health & alerts",
   "nav.configs": "Configs",
   "nav.settings": "Settings",

@@ -46,7 +46,7 @@ import otp from '../services/otp.js';
 import trial from '../services/trial.js';
 import bcrypt from 'bcrypt';
 import { signCustomerToken, requireCustomer } from '../middleware/auth.js';
-import { bandwidthDaily } from '../services/bandwidth.js';
+import { bandwidthDaily, getCustomerShareView } from '../services/bandwidth.js';
 import offersService from '../services/offers.js';
 
 const router = Router();
@@ -988,6 +988,24 @@ router.get('/account/subscriptions/:id/bandwidth', requireCustomer, async (req, 
     res.json({ days: rows });
   } catch (err) {
     logger.error({ err }, 'portal bandwidth failed');
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// ============================================================
+// "Right now you're getting X Mbps" — idle-share benefit view
+// for the customer portal. Shown when the capacity admin
+// configured the router with an uplink and the feature flag
+// `bandwidth.show_customer_share` is on.
+// ============================================================
+router.get('/account/share', requireCustomer, async (req, res) => {
+  try {
+    const acc = req.account;
+    if (!acc.customer_id) return res.json({ ok: true, enabled: false, hasSub: false });
+    const data = await getCustomerShareView(acc.customer_id);
+    res.json(data);
+  } catch (err) {
+    logger.error({ err }, 'share view failed');
     res.status(500).json({ error: 'internal error' });
   }
 });

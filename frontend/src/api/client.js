@@ -281,6 +281,16 @@ export const apiStaticIpAssign           = (subscriptionId, ip) =>
 export const apiStaticIpClear            = (subscriptionId) =>
   api.delete(`/suspensions/subscriptions/${subscriptionId}/static-ip`).then((r) => r.data);
 
+// ---------- Bandwidth capacity / load balance ------------------
+export const apiBandwidthOverview        = (routerId) =>
+  api.get('/bandwidth/overview', { params: { router_id: routerId } }).then((r) => r.data);
+export const apiBandwidthHistory         = (routerId, hours = 24) =>
+  api.get('/bandwidth/history', { params: { router_id: routerId, hours } }).then((r) => r.data.rows);
+export const apiBandwidthRouterIfaces    = (routerId) =>
+  api.get(`/bandwidth/router/${routerId}/interfaces`).then((r) => r.data.interfaces);
+export const apiBandwidthSaveUplink      = (routerId, payload) =>
+  api.put(`/bandwidth/router/${routerId}/uplink`, payload).then((r) => r.data);
+
 // ---------- Events / alerts ------------------------------------
 export const apiEvents          = (status = 'open') =>
   api.get('/monitoring/events', { params: { status } }).then((r) => r.data.events);
