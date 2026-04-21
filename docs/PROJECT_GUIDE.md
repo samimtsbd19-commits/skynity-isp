@@ -100,7 +100,7 @@ src/
 │   ├── packages.js               ← package CRUD
 │   ├── orders.js                 ← order pipeline (pending → approved → active)
 │   ├── vouchers.js               ← voucher batch + redeem
-│   ├── hotspot.js                ← hotspot management (users/profiles/active/hosts/log/template)
+│   ├── hotspot.js                ← hotspot management + visual template editor + logo upload
 │   ├── vpn.js                    ← WireGuard tunnel CRUD
 │   ├── routers.js                ← MikroTik router CRUD
 │   ├── monitoring.js             ← live stats
@@ -113,7 +113,9 @@ src/
 │   ├── health.js                 ← service health events
 │   ├── events.js                 ← event summary
 │   ├── portal.js                 ← public portal (no auth)
-│   └── configs.js                ← MikroTik config generator
+│   ├── configs.js                ← MikroTik config generator
+│   ├── diagnostics.js            ← live status + test endpoints (telegram/AI/MikroTik)
+│   └── guide.js                  ← read/write docs/PROJECT_GUIDE.md
 ├── services/
 │   ├── provisioning.js           ← create PPPoE/hotspot user on MikroTik
 │   ├── monitoring.js             ← live session polling + dynamic PCQ update
@@ -127,9 +129,10 @@ src/
 │   ├── staticIp.js               ← static IP assignment
 │   └── audit.js                  ← write audit log
 ├── telegram/
-│   ├── bot.js                    ← bot init, polling
+│   ├── bot.js                    ← bot init (DB token + env fallback, hot-reload support)
 │   ├── admin-commands.js         ← /customers /subs /health commands
-│   ├── claude-commands.js        ← /ai /models /emergency_on commands
+│   ├── claude-commands.js        ← /ai /models /emergency_on commands (with SKYNITY_SYSTEM context)
+│   ├── quick-commands.js         ← /huser /puser /vgen — one-line user & voucher creation
 │   └── poll-control.js           ← pause/resume polling
 ├── jobs/
 │   └── scheduler.js              ← cron: sync, PCQ update, expiry reminders, quota
@@ -191,7 +194,8 @@ src/
     ├── Admins.jsx                ← admin user mgmt
     ├── Activity.jsx              ← audit log view
     ├── Settings.jsx              ← admin profile
-    ├── ProjectGuide.jsx          ← THIS PAGE (/guide)
+    ├── ProjectGuide.jsx          ← /guide — THIS DOCUMENT (view/edit markdown)
+    ├── Diagnostics.jsx           ← /diagnostics — live service tests & hot-reload
     └── PublicPortal.jsx          ← customer-facing (no auth)
 ```
 
@@ -270,14 +274,31 @@ skynity-isp/
 - [x] Telegram bot (admin commands)
 - [x] Telegram AI assistant (`/ai` with Anthropic + OpenRouter)
 - [x] AI knows full project context (this file is injected)
+- [x] **Telegram bot token hot-reload** (DB-stored, no `.env` edit, restart via UI)
+- [x] **Quick Telegram shortcuts**:
+  - `/huser 5M 30d` — hotspot user with auto-generated credentials
+  - `/puser 10M 30d` — PPPoE user
+  - `/vgen 20 5M 7d` — batch voucher generation (up to 100)
 - [x] Multi-language UI (Bengali 🇧🇩 + English 🇺🇸)
 
 ### Deployment
 - [x] Docker Compose stack (5 services)
 - [x] Caddy reverse proxy with `{$DOMAIN}` variable
 - [x] Git-based deployment (push → SSH → pull → build)
-- [x] Persistent volumes (MySQL, Redis, uploads)
+- [x] Persistent volumes (MySQL, Redis, uploads, docs)
 - [x] Capacitor mobile wrapper (Android/iOS config ready)
+
+### Admin & Documentation
+- [x] **Live Diagnostics page** (`/diagnostics`):
+  - Telegram: token input + test + hot-reload bot (no backend restart)
+  - AI: API key input + live test + provider toggle
+  - MikroTik: connection test + **LIVE stats** (3s refresh, bypasses DB)
+  - Infrastructure: MySQL latency, Redis, uploads, WireGuard status
+- [x] **Project Guide page** (`/guide`):
+  - Markdown-rendered view of this file (AI handoff document)
+  - Edit mode with side-by-side preview
+  - Copy-for-AI button (clipboard the whole guide)
+  - Auto-count done / pending / in-progress markers
 
 ---
 
@@ -476,14 +497,38 @@ docs: <doc-only changes>
 
 ## 📌 Recent Major Changes (changelog)
 
-- **2026-04-21** — Added Portal Template Visual Editor (logo upload, colors, typography, mobile preview)
-- **2026-04-21** — Added Hotspot Management module (5 tabs)
-- **2026-04-21** — Wired Telegram AI with full project context
-- **2026-04-21** — VPS fresh deploy (no Coolify) with HTTPS via Let's Encrypt
+- **2026-04-21** — **Telegram Quick Commands** (`/huser`, `/puser`, `/vgen`) — one-line user & voucher creation with auto-generated credentials
+- **2026-04-21** — **Live Diagnostics page** — hot-reload Telegram token, live API tests, MikroTik real-time stats (3s refresh)
+- **2026-04-21** — **Project Guide page** — this document now editable from admin UI with Copy-for-AI
+- **2026-04-21** — **Portal Template Visual Editor** — logo upload, color pickers, typography, mobile phone preview
+- **2026-04-21** — **Hotspot Management** module (5 tabs: active/users/profiles/hosts/log)
+- **2026-04-21** — **Telegram AI** wired with full project context (SKYNITY_SYSTEM prompt)
+- **2026-04-21** — **VPS fresh deploy** (removed Coolify) with HTTPS via Let's Encrypt
 - **2026-04-20** — WireGuard tunnel (VPS ↔ MikroTik) auto-start
-- **2026-04-20** — Dynamic PCQ bandwidth sharing
-- **2026-04-20** — Admin extend subscription feature
+- **2026-04-20** — Dynamic PCQ bandwidth sharing (updates every 30 min)
+- **2026-04-20** — Admin extend subscription feature (+7/10/15/30/60 days)
 
 ---
 
 *Last updated: 2026-04-21 · Edit this file as the project evolves.*
+
+## 🔑 Telegram Bot Quick Reference
+
+**Shortcut commands (admin only):**
+
+| Command | Effect |
+|---------|--------|
+| `/huser 5M 30d` | Create hotspot user — 5 Mbps, 30 days |
+| `/puser 10M 30d` | Create PPPoE user |
+| `/vgen 20 5M 7d` | Generate 20 voucher codes |
+| `/ai` | Start AI chat with full project context |
+| `/ai <question>` | One-shot AI question |
+| `/ai_stop` | End AI session |
+| `/emergency_on` | Pause all cron jobs |
+| `/emergency_off` | Resume cron jobs |
+| `/bot_pause` | Pause Telegram polling |
+| `/bot_resume` | Resume polling |
+| `/quick` or `/shortcuts` | Show all shortcut help |
+
+**Speed units:** `K` (kbps), `M` (Mbps), `G` (Gbps)
+**Duration units:** `d` (days), `h` (hours), `m` (minutes)
