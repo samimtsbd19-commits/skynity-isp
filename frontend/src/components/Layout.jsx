@@ -6,7 +6,7 @@ import {
   ScrollText, Settings, FileCode, Shield, Terminal, Wifi,
   RefreshCw, UserCog, Cog, Ticket, ChevronDown, UserCheck,
   HeartPulse, Globe, Megaphone, Gauge, Ban, TrendingUp, ShieldAlert, Menu, X,
-  BookOpen, Stethoscope, Brain,
+  BookOpen, Stethoscope, Brain, Palette,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
@@ -25,52 +25,79 @@ import { useLang, useT, LANG_LABELS } from '../i18n';
 // Group structure is fully translated via i18n keys. We keep the
 // icon/route here and look up the label at render time so language
 // changes are instant without re-mounting the sidebar.
+// ─── Sidebar, reorganized by frequency of use + purpose ──────
+// Duplicate tabs hidden (but routes still reachable if bookmarked):
+//   /router-monitor  → historical charts (keep URL, remove from nav; Live Monitor is primary)
+//   /monitoring      → old live sessions page (replaced by Live Monitor)
+// Everything flows top-to-bottom in the order an operator actually uses them.
 const GROUPS = [
+  // Quick launch — what you open first every time
+  {
+    key: 'dashboard',
+    label: 'Dashboard',
+    items: [
+      { to: '/',            label: 'nav.overview',     icon: LayoutDashboard, end: true },
+      { to: '/live-monitor',label: 'Live Monitor',     icon: Activity },
+      { to: '/orders',      label: 'nav.orders',       icon: Inbox, badge: 'pending' },
+    ],
+  },
+  // Day-to-day customer ops
   {
     key: 'customers',
     label: 'nav.customers',
     items: [
-      { to: '/',                   label: 'nav.overview',       icon: LayoutDashboard, end: true },
-      { to: '/orders',             label: 'nav.orders',         icon: Inbox, badge: 'pending' },
-      { to: '/customers',          label: 'nav.customersPage',  icon: Users },
-      { to: '/customer-accounts',  label: 'nav.portalAccounts', icon: UserCheck },
-      { to: '/subscriptions',      label: 'nav.subscriptions',  icon: Activity },
-      { to: '/vouchers',           label: 'nav.vouchers',       icon: Ticket },
-      { to: '/offers',             label: 'nav.offers',         icon: Megaphone },
-      { to: '/suspensions',        label: 'nav.suspensions',    icon: Ban, badge: 'suspensions' },
+      { to: '/customers',         label: 'nav.customersPage',  icon: Users },
+      { to: '/customer-accounts', label: 'nav.portalAccounts', icon: UserCheck },
+      { to: '/subscriptions',     label: 'nav.subscriptions',  icon: Activity },
+      { to: '/suspensions',       label: 'nav.suspensions',    icon: Ban, badge: 'suspensions' },
     ],
   },
+  // Money & plans
+  {
+    key: 'catalogue',
+    label: 'Plans & Vouchers',
+    items: [
+      { to: '/packages', label: 'nav.packages', icon: Package },
+      { to: '/vouchers', label: 'nav.vouchers', icon: Ticket },
+      { to: '/offers',   label: 'nav.offers',   icon: Megaphone },
+    ],
+  },
+  // Live ops & incident response
+  {
+    key: 'monitoring',
+    label: 'Monitoring',
+    items: [
+      { to: '/health',    label: 'nav.health',    icon: HeartPulse, badge: 'health' },
+      { to: '/bandwidth', label: 'nav.bandwidth', icon: TrendingUp },
+      { to: '/security',  label: 'nav.security',  icon: ShieldAlert },
+    ],
+  },
+  // Network config — less frequent but important
   {
     key: 'network',
     label: 'nav.network',
     items: [
-      { to: '/live-monitor',    label: 'Live Monitor',      icon: Activity },
-      { to: '/health',          label: 'nav.health',        icon: HeartPulse, badge: 'health' },
-      { to: '/security',       label: 'nav.security',      icon: ShieldAlert },
-      { to: '/router-monitor',  label: 'nav.routerMonitor', icon: Gauge },
-      { to: '/bandwidth',       label: 'nav.bandwidth',     icon: TrendingUp },
-      { to: '/monitoring',      label: 'nav.liveSessions',  icon: Radio },
-      { to: '/packages',   label: 'nav.packages',   icon: Package },
-      { to: '/routers',    label: 'nav.routers',    icon: RouterIcon },
-      { to: '/configs',         label: 'nav.configs',    icon: FileCode },
-      { to: '/hotspot',         label: 'Hotspot',        icon: Wifi },
-      { to: '/hotspot-template',label: 'Portal Template', icon: FileCode },
-      { to: '/vpn',             label: 'VPN',            icon: Shield },
-      { to: '/scripts',    label: 'Scripts',        icon: Terminal },
-      { to: '/updates',    label: 'Updates',        icon: RefreshCw },
+      { to: '/routers',          label: 'nav.routers',    icon: RouterIcon },
+      { to: '/hotspot',          label: 'Hotspot',        icon: Wifi },
+      { to: '/hotspot-template', label: 'Portal Template',icon: Palette },
+      { to: '/vpn',              label: 'VPN',            icon: Shield },
+      { to: '/configs',          label: 'nav.configs',    icon: FileCode },
+      { to: '/scripts',          label: 'Scripts',        icon: Terminal },
+      { to: '/updates',          label: 'Updates',        icon: RefreshCw },
     ],
   },
+  // System admin
   {
     key: 'admin',
     label: 'nav.admin',
     items: [
-      { to: '/admins',   label: 'nav.users',    icon: UserCog },
-      { to: '/system',   label: 'nav.settings', icon: Cog },
-      { to: '/activity', label: 'nav.audit',    icon: ScrollText },
-      { to: '/settings', label: 'Profile',      icon: Settings },
-      { to: '/diagnostics', label: 'Diagnostics', icon: Stethoscope },
-      { to: '/memory',   label: 'AI Memory',      icon: Brain },
-      { to: '/guide',    label: 'Project Guide', icon: BookOpen },
+      { to: '/diagnostics', label: 'Diagnostics',   icon: Stethoscope },
+      { to: '/admins',      label: 'nav.users',     icon: UserCog },
+      { to: '/system',      label: 'nav.settings',  icon: Cog },
+      { to: '/activity',    label: 'nav.audit',     icon: ScrollText },
+      { to: '/memory',      label: 'AI Memory',     icon: Brain },
+      { to: '/guide',       label: 'Project Guide', icon: BookOpen },
+      { to: '/settings',    label: 'Profile',       icon: Settings },
     ],
   },
 ];

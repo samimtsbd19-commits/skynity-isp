@@ -4,13 +4,14 @@ import { Link } from 'react-router-dom';
 import {
   Wallet, Activity, Inbox, Clock, Signal, Wifi, AlertTriangle,
   AlertOctagon, CheckCircle2, HeartPulse, ChevronRight,
+  Cpu, MemoryStick, Download, Upload, Thermometer, Gauge,
 } from 'lucide-react';
 import {
   AreaChart, Area, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
 import {
   apiStats, apiStatsRevenue, apiOrders, apiMikrotikInfo, apiMikrotikActive,
-  apiEventsSummary, apiEvents,
+  apiEventsSummary, apiEvents, apiLiveDashboard,
 } from '../api/client';
 import { useSelectedRouter } from '../contexts/RouterContext';
 import { StatCard, StatusPill, EmptyState } from '../components/primitives';
@@ -47,6 +48,13 @@ export default function Dashboard() {
     queryFn: () => apiMikrotikInfo(routerId),
     retry: false, refetchInterval: 60_000,
   });
+  // Live MikroTik metrics (CPU/RAM/bandwidth) — refreshes every 5s for dashboard glance
+  const { data: live } = useQuery({
+    queryKey: ['dashboard-live', routerId],
+    queryFn: () => apiLiveDashboard(routerId),
+    refetchInterval: 5_000,
+    retry: false,
+  });
   const { data: mtActive } = useQuery({
     queryKey: ['mt-active', routerId],
     queryFn: () => apiMikrotikActive(routerId),
@@ -79,6 +87,10 @@ export default function Dashboard() {
 
       <div className="p-8 space-y-8">
         <HealthBanner />
+
+        {/* LIVE ROUTER STRIP — at-a-glance real-time router health */}
+        <LiveRouterStrip data={live} />
+
         {/* STAT GRID */}
         <section>
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -367,6 +379,85 @@ function Row({ label, value }) {
     <div className="flex items-center justify-between text-xs">
       <dt className="text-text-mute uppercase tracking-wider">{label}</dt>
       <dd className="text-text">{value ?? '—'}</dd>
+    </div>
+  );
+}
+
+// ============================================================
+// Live router strip — real-time CPU/RAM/bandwidth on the dashboard
+// so the operator sees the health of their network without
+// clicking into Live Monitor. Refreshes every 5 seconds.
+// ============================================================
+function LiveRouterStrip({ data }) {
+  const fmtBps = (bps) => {
+    const n = Number(bps || 0);
+    if (n < 1000) return `${n} bps`;
+    if (n < 1_000_000) return `${(n / 1000).toFixed(1)} Kbps`;
+    if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(1)} Mbps`;
+    return `${(n / 1_000_000_000).toFixed(1)} Gbps`;
+  };
+  const fmtMem = (b) => `${Math.round((b || 0) / 1024 / 1024)}`;
+
+  if (!data?.ts) {
+    return (
+      <div className="panel p-4 flex items-center justify-center text-text-mute text-xs font-mono">
+        <Activity size={14} className="animate-pulse mr-2" /> Connecting to router…
+      </div>
+    );
+  }
+  const r = data.resource || {};
+  const t = data.totals || {};
+  const memPct = r.memory_total ? Math.round(((r.memory_total - r.memory_free) / r.memory_total) * 100) : 0;
+  const tiles = [
+    { icon: Cpu,         label: 'CPU',        value: `${r.cpu_load ?? 0}%`, pct: r.cpu_load || 0,  accent: r.cpu_load > 80 ? 'red' : r.cpu_load > 50 ? 'amber' : 'green' },
+    { icon: MemoryStick, label: 'Memory',     value: `${memPct}%`, sub: `${fmtMem(r.memory_total - r.memory_free)}/${fmtMem(r.memory_total)} MB`, pct: memPct, accent: memPct > 80 ? 'red' : 'amber' },
+    { icon: Download,    label: 'Download',   value: fmtBps(t.total_rx_bps), accent: 'amber' },
+    { icon: Upload,      label: 'Upload',     value: fmtBps(t.total_tx_bps), accent: 'amber' },
+    { icon: Activity,    label: 'PPPoE On',   value: t.pppoe_online ?? 0,   sub: `${t.total_pppoe_users ?? 0} total`, accent: 'green' },
+    { icon: Wifi,        label: 'Hotspot On', value: t.hotspot_online ?? 0, sub: `${t.total_hotspot_users ?? 0} total`, accent: 'green' },
+    { icon: Thermometer, label: 'Temp',       value: r.temperature ? `${r.temperature}°C` : '—', accent: r.temperature > 70 ? 'red' : 'green' },
+    { icon: Clock,       label: 'Uptime',     value: r.uptime || '—', accent: 'text' },
+  ];
+
+  return (
+    <Link to="/live-monitor" className="block group">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="inline-block w-2 h-2 rounded-full bg-green animate-pulse" />
+        <span className="text-mono text-[10px] uppercase tracking-[0.2em] text-text-mute">
+          Live Router · {r.board_name || ''} · {r.version || ''}
+        </span>
+        <span className="text-[10px] text-text-mute font-mono">· auto-refresh 5s</span>
+        <ChevronRight size={11} className="text-text-mute group-hover:text-amber ml-auto" />
+      </div>
+      <div className="grid grid-cols-4 md:grid-cols-4 lg:grid-cols-8 gap-2">
+        {tiles.map((tl) => (
+          <LiveTile key={tl.label} {...tl} />
+        ))}
+      </div>
+    </Link>
+  );
+}
+
+function LiveTile({ icon: Icon, label, value, sub, pct, accent = 'amber' }) {
+  const accentClass = accent === 'red' ? 'text-red' : accent === 'green' ? 'text-green' : accent === 'text' ? 'text-text' : 'text-amber';
+  return (
+    <div className="panel p-3 relative overflow-hidden">
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-mono text-[9px] text-text-mute uppercase tracking-widest">{label}</div>
+        <Icon size={11} className={accentClass} />
+      </div>
+      <div className={`font-display text-xl leading-none ${accentClass}`}>{value}</div>
+      {sub && <div className="text-[10px] text-text-mute font-mono mt-1 truncate">{sub}</div>}
+      {pct !== undefined && (
+        <div className="mt-1.5 h-0.5 bg-surface2 rounded-full overflow-hidden">
+          <div
+            className={`h-full transition-all duration-500 ${
+              accent === 'red' ? 'bg-red' : accent === 'green' ? 'bg-green' : 'bg-amber'
+            }`}
+            style={{ width: `${Math.min(100, pct)}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 }
