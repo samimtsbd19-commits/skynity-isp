@@ -1,18 +1,21 @@
-import { authenticator } from 'otplib';
+import { generateSecret, generateURI, verifySync } from 'otplib';
 import QRCode from 'qrcode';
 import crypto from 'node:crypto';
 import bcrypt from 'bcrypt';
 import db from '../database/pool.js';
 import config from '../config/index.js';
 
-authenticator.options = { window: 1 };
+/** Seconds of clock skew / transmission delay (≈ old otplib window 1 × 30s period). */
+const TOTP_EPOCH_TOLERANCE = 30;
 
 export async function beginEnrollment(admin) {
   if (admin.totp_enabled) throw new Error('2FA already enabled; disable first');
-  const secret = authenticator.generateSecret();
-  const label = encodeURIComponent(`${config.APP_NAME}:${admin.username}`);
-  const issuer = encodeURIComponent(config.APP_NAME);
-  const otpauth = `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}`;
+  const secret = generateSecret();
+  const otpauth = generateURI({
+    issuer: config.APP_NAME,
+    label: admin.username,
+    secret,
+  });
   const qrDataUrl = await QRCode.toDataURL(otpauth);
   await db.query('UPDATE admins SET totp_secret = ? WHERE id = ?', [secret, admin.id]);
   return { secret, otpauth, qrDataUrl };
@@ -22,9 +25,12 @@ export async function confirmEnrollment(adminId, code) {
   const row = await db.queryOne('SELECT totp_secret, totp_enabled FROM admins WHERE id = ?', [adminId]);
   if (!row?.totp_secret) throw new Error('no pending enrollment');
   if (row.totp_enabled) throw new Error('2FA already enabled');
-  if (!authenticator.check(String(code).replace(/\s/g, ''), row.totp_secret)) {
-    throw new Error('invalid code');
-  }
+  const { valid } = verifySync({
+    secret: row.totp_secret,
+    token: String(code).replace(/\s/g, ''),
+    epochTolerance: TOTP_EPOCH_TOLERANCE,
+  });
+  if (!valid) throw new Error('invalid code');
   const codes = Array.from({ length: 8 }, () => crypto.randomBytes(5).toString('hex'));
   const hashed = await Promise.all(codes.map((c) => bcrypt.hash(c, 10)));
   await db.query(
@@ -43,7 +49,12 @@ export async function verify(adminId, code) {
   const clean = String(code || '').replace(/\s/g, '');
 
   if (/^\d{6}$/.test(clean) && row.totp_secret) {
-    return authenticator.check(clean, row.totp_secret);
+    const { valid } = verifySync({
+      secret: row.totp_secret,
+      token: clean,
+      epochTolerance: TOTP_EPOCH_TOLERANCE,
+    });
+    return valid;
   }
 
   if (row.totp_backup_codes) {
