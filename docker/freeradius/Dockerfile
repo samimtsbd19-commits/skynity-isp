@@ -16,9 +16,14 @@ FROM freeradius/freeradius-server:3.2.8-alpine
 # Dict / SQL module / site / clients overlay
 COPY raddb/ /etc/raddb/
 
-# Permissions: FreeRADIUS runs as radiusd and MUST own its config
+# Permissions: vendor Alpine image uses `radius` (not `radiusd`); Debian uses `freerad`.
 RUN set -eux; \
-    chown -R radiusd:radiusd /etc/raddb; \
+    OWNER=; \
+    for U in radius freerad radiusd; do \
+      if id -u "$U" >/dev/null 2>&1; then OWNER=$U; break; fi; \
+    done; \
+    if [ -z "$OWNER" ]; then echo "No FreeRADIUS UNIX user in base image"; exit 1; fi; \
+    chown -R "$OWNER:$OWNER" /etc/raddb; \
     chmod 640 /etc/raddb/clients.conf /etc/raddb/mods-available/sql 2>/dev/null || true; \
     # Enable the SQL module + Skynity site (symlinks)
     ln -sf /etc/raddb/mods-available/sql   /etc/raddb/mods-enabled/sql; \
