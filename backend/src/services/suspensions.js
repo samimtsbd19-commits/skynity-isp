@@ -30,6 +30,7 @@ import logger from '../utils/logger.js';
 import { getMikrotikClient } from '../mikrotik/client.js';
 import { getSetting } from './settings.js';
 import notifier from './notifier.js';
+import radius from './radius.js';
 
 /** Convert a UI preset (string) to a concrete Date or null (=permanent). */
 export function durationToEndsAt(preset, customHours) {
@@ -114,6 +115,23 @@ export async function applySuspension({
       mtErr = err.message;
       logger.warn({ err: err.message, subscriptionId: s.id }, 'suspension: mikrotik disable failed');
     }
+
+    // RADIUS: block future auth + queue a CoA so any live
+    // session is dropped immediately. Non-fatal — RADIUS drift
+    // is surfaced via radius_sync_log, not here.
+    try {
+      if (await radius.isEnabled()) {
+        await radius.disableUser(s.login_username, `suspension:${reason || 'n/a'}`);
+        await radius.queueDisconnect({
+          subscriptionId: s.id,
+          username: s.login_username,
+          routerId: s.router_id,
+          reason: `suspension:${reason || ''}`.slice(0, 100),
+        });
+      }
+    } catch (err) {
+      logger.warn({ err: err.message, subscriptionId: s.id }, 'suspension: radius disable failed');
+    }
   }
 
   await db.query(
@@ -185,6 +203,17 @@ export async function liftSuspension(suspensionId, { adminId, reason } = {}) {
     } catch (err) {
       logger.warn({ err: err.message, subscriptionId: s.id }, 'lift: mikrotik enable failed');
     }
+
+    // RADIUS: clear the Auth-Type := Reject attr iff the sub
+    // is moving back to 'active'. Leave expired subs blocked.
+    try {
+      if (shouldBeActive && await radius.isEnabled()) {
+        await radius.enableUser(s.login_username);
+      }
+    } catch (err) {
+      logger.warn({ err: err.message, subscriptionId: s.id }, 'lift: radius enable failed');
+    }
+
     await db.query(
       `UPDATE subscriptions
           SET status = COALESCE(status_before_suspension, status),

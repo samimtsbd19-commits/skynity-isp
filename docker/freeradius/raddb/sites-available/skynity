@@ -1,0 +1,114 @@
+# ============================================================
+# Skynity ISP — Virtual server
+# ------------------------------------------------------------
+# Single virtual server that handles:
+#   - PPPoE auth (RouterOS /ppp aaa use-radius=yes)
+#   - Hotspot auth (RouterOS /ip hotspot profile use-radius=yes)
+#   - Accounting (Start / Interim / Stop packets to 1813)
+#   - Post-auth logging (success + reject audit)
+#   - CoA / Disconnect (inbound on 3799 — for future self-service)
+#
+# Auth flow:
+#   authorize → pap                (Cleartext-Password from SQL)
+#   authorize → chap               (same, MD5)
+#   authorize → mschap             (same, NT-hash handled by mschap)
+#   authorize → sql                (check radcheck + radusergroup →
+#                                   radgroupreply for Mikrotik-Rate-Limit)
+#   authenticate → pap / chap / mschap
+#   accounting  → sql              (radacct rows)
+#   post-auth   → sql              (radpostauth audit)
+# ============================================================
+
+server skynity {
+    listen {
+        type   = auth
+        ipaddr = *
+        port   = 1812
+        limit {
+            max_connections = 256
+            lifetime        = 0
+            idle_timeout    = 30
+        }
+    }
+
+    listen {
+        type   = acct
+        ipaddr = *
+        port   = 1813
+    }
+
+    # CoA / Disconnect listener (inbound from backend if we ever
+    # want to receive confirmations; outbound CoA to NAS is
+    # originated by the Skynity backend, not by FreeRADIUS).
+    listen {
+        type   = coa
+        ipaddr = *
+        port   = 3799
+    }
+
+    authorize {
+        preprocess
+        # Strip realm if customer types "user@realm"
+        suffix
+
+        # MikroTik sends Service-Type = Framed for PPPoE
+        # and Login-User for Hotspot. We accept both.
+
+        # Password-carrying protocol handlers — each one
+        # sets Auth-Type = <proto> if the packet matches.
+        chap
+        mschap
+        pap
+
+        # Pull the user from SQL. This fills Cleartext-Password
+        # (from radcheck), any radreply attrs, and — via the
+        # group lookup — the radgroupreply row for the user's
+        # package (Mikrotik-Rate-Limit, Session-Timeout, etc.)
+        sql
+
+        # Expiration / logintime — if the subscription's
+        # Expiration attribute has passed, reject. This is an
+        # extra safety net on top of the Skynity cron job.
+        expiration
+        logintime
+
+        # If no password protocol matched but we have a
+        # Cleartext-Password, default to PAP.
+        pap
+    }
+
+    authenticate {
+        Auth-Type PAP    { pap }
+        Auth-Type CHAP   { chap }
+        Auth-Type MS-CHAP { mschap }
+    }
+
+    preacct {
+        preprocess
+        acct_unique
+        suffix
+    }
+
+    accounting {
+        detail                 # keep a flat-file trail for debug
+        sql                    # persist to radacct
+        exec
+    }
+
+    session {
+        sql                    # used by Simultaneous-Use checks
+    }
+
+    post-auth {
+        sql                    # radpostauth audit row
+        exec
+
+        Post-Auth-Type REJECT {
+            sql
+            attr_filter.access_reject
+        }
+    }
+
+    pre-proxy { }
+    post-proxy { }
+}

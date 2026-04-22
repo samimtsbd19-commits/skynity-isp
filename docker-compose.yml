@@ -152,6 +152,13 @@ services:
       MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-5}
 
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://${DOMAIN:-wifi.skynity.org}}
+
+      # --- RADIUS / AAA ---
+      RADIUS_HOST: ${RADIUS_HOST:-freeradius}
+      RADIUS_AUTH_PORT: ${RADIUS_AUTH_PORT:-1812}
+      RADIUS_ACCT_PORT: ${RADIUS_ACCT_PORT:-1813}
+      RADIUS_COA_PORT: ${RADIUS_COA_PORT:-3799}
+      RADIUS_LOCALHOST_SECRET: ${RADIUS_LOCALHOST_SECRET:-}
     depends_on:
       mysql:
         condition: service_healthy
@@ -185,6 +192,54 @@ services:
       - backend
     expose:
       - "80"
+
+  # ------------------------------------------------------------
+  # FreeRADIUS 3.2 — centralised AAA for PPPoE + Hotspot.
+  #
+  # Runs on the same MySQL instance as the rest of Skynity (no
+  # secondary DB to babysit). Exposes 1812/udp (auth), 1813/udp
+  # (accounting) and 3799/udp (CoA) on the HOST so a MikroTik
+  # NAS sitting outside the docker network can reach it.
+  #
+  # The ports are UDP — ensure the VPS firewall permits them:
+  #   ufw allow 1812/udp
+  #   ufw allow 1813/udp
+  #   ufw allow 3799/udp
+  #
+  # Flip `feature.radius_enabled` from the admin panel once the
+  # MikroTik has been pointed at this server. See docs/RADIUS.md
+  # for the full migration runbook.
+  # ------------------------------------------------------------
+  freeradius:
+    build:
+      context: ./docker/freeradius
+    restart: unless-stopped
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-skynity}
+      DB_USER: ${DB_USER:-skynity}
+      DB_PASSWORD: ${DB_PASSWORD}
+      RADIUS_LOCALHOST_SECRET: ${RADIUS_LOCALHOST_SECRET:-change_me_localhost_secret}
+      TZ: ${APP_TIMEZONE:-Asia/Dhaka}
+    ports:
+      - "1812:1812/udp"
+      - "1813:1813/udp"
+      - "3799:3799/udp"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # `radiusd -Cx` does a one-shot config-check. If the daemon
+      # loaded its raddb tree and connected to MySQL without
+      # errors this exits 0.
+      test: ["CMD", "radiusd", "-Cx"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
 
 volumes:
   mysql_data:

@@ -16,7 +16,34 @@ import { getMikrotikClient } from '../mikrotik/client.js';
 import { randomUsername, randomPassword } from '../utils/crypto.js';
 import { normaliseMac } from '../utils/mac.js';
 import { getSetting } from './settings.js';
+import radius from './radius.js';
 import logger from '../utils/logger.js';
+
+// Helper — push a subscription to RADIUS if the feature flag is on.
+// Never throws: RADIUS drift is surfaced via radius_sync_log +
+// subscriptions.radius_error, not via provisioning failures.
+async function syncToRadius(subscription, pkg, action) {
+  try {
+    if (!(await radius.isEnabled())) return;
+    if (action === 'upsert') {
+      await radius.upsertUser(subscription, { pkg });
+    } else if (action === 'disable') {
+      await radius.disableUser(subscription.login_username, 'expired');
+      await radius.queueDisconnect({
+        subscriptionId: subscription.id,
+        username: subscription.login_username,
+        routerId: subscription.router_id,
+        reason: 'expired',
+      });
+    } else if (action === 'enable') {
+      await radius.enableUser(subscription.login_username);
+    } else if (action === 'delete') {
+      await radius.deleteUser(subscription.login_username);
+    }
+  } catch (err) {
+    logger.warn({ err: err.message, subId: subscription.id, action }, 'radius sync failed (non-fatal)');
+  }
+}
 
 async function generateCustomerCode() {
   const row = await db.queryOne('SELECT COUNT(*) AS c FROM customers');
@@ -208,6 +235,10 @@ export async function approveOrderAndProvision({ orderId, adminId }) {
     [mtSynced ? 1 : 0, mtError, subscriptionId]
   );
 
+  // 3b) push to RADIUS (feature-flagged — no-op when disabled)
+  const freshSub = await db.queryOne('SELECT * FROM subscriptions WHERE id = ?', [subscriptionId]);
+  await syncToRadius(freshSub, pkg, 'upsert');
+
   // 4) finalize order
   await db.query(
     `UPDATE orders
@@ -338,6 +369,13 @@ async function approveRenewal({ order, pkg, adminId, orderMac }) {
     [mtSynced ? 1 : 0, mtError, sub.id]
   );
 
+  // Push refreshed subscription (new expiry, maybe new profile)
+  // to FreeRADIUS. Re-enables the user if they'd been marked
+  // reject during a previous expiry.
+  const refreshed = await db.queryOne('SELECT * FROM subscriptions WHERE id = ?', [sub.id]);
+  await syncToRadius(refreshed, pkg, 'upsert');
+  await syncToRadius(refreshed, pkg, 'enable');
+
   await db.query(
     `UPDATE orders
        SET status = 'approved', approved_by = ?, approved_at = NOW(),
@@ -428,6 +466,9 @@ export async function expireSubscription(subscriptionId) {
     logger.error({ err, subscriptionId }, 'failed to disable on mikrotik during expiry');
   }
 
+  // RADIUS: block future auth + kick any live session
+  await syncToRadius(sub, null, 'disable');
+
   await db.query(`UPDATE subscriptions SET status = 'expired' WHERE id = ?`, [subscriptionId]);
   return true;
 }
@@ -499,6 +540,14 @@ export async function extendSubscription(subscriptionId, days, note = '') {
   } catch (err) {
     mtError = err.message;
     logger.warn({ err: err.message, subscriptionId }, 'extend: mikrotik re-enable failed');
+  }
+
+  // RADIUS: re-push with new expiry + remove any reject attr.
+  {
+    const fresh = await db.queryOne('SELECT * FROM subscriptions WHERE id = ?', [subscriptionId]);
+    const pkg   = await db.queryOne('SELECT * FROM packages WHERE id = ?', [sub.package_id]);
+    await syncToRadius(fresh, pkg, 'upsert');
+    await syncToRadius(fresh, pkg, 'enable');
   }
 
   logger.info(

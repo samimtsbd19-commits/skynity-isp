@@ -1,0 +1,64 @@
+# ============================================================
+# Skynity ISP — FreeRADIUS SQL module
+# ------------------------------------------------------------
+# Backend database where the canonical FreeRADIUS tables
+# (radcheck, radreply, radgroupcheck, radgroupreply,
+#  radusergroup, radacct, radpostauth, nas) live alongside
+# Skynity's own application tables.
+#
+# Credentials come from env vars so the same file is usable
+# in dev / staging / production without edits.
+# ============================================================
+
+sql {
+    driver      = "rlm_sql_mysql"
+    dialect     = "mysql"
+
+    server      = "${env:DB_HOST}"
+    port        = "${env:DB_PORT}"
+    login       = "${env:DB_USER}"
+    password    = "${env:DB_PASSWORD}"
+    radius_db   = "${env:DB_NAME}"
+
+    # FreeRADIUS 3.x canonical table names. We reuse the stock
+    # schema verbatim, so no table rename is needed.
+    acct_table1      = "radacct"
+    acct_table2      = "radacct"
+    postauth_table   = "radpostauth"
+    authcheck_table  = "radcheck"
+    authreply_table  = "radreply"
+    groupcheck_table = "radgroupcheck"
+    groupreply_table = "radgroupreply"
+    usergroup_table  = "radusergroup"
+
+    delete_stale_sessions = yes
+
+    pool {
+        start       = 2
+        min         = 2
+        max         = 16
+        spare       = 4
+        uses        = 0
+        retry_delay = 30
+        lifetime    = 0
+        idle_timeout = 60
+    }
+
+    # Pull NAS (= MikroTik router) list from SQL so it can be
+    # reloaded at runtime from the Skynity admin panel without
+    # restarting FreeRADIUS.
+    read_clients = yes
+    client_table = "nas"
+
+    # Only authorize a user if they're a member of a group.
+    # This keeps orphaned radcheck rows from accidentally
+    # granting access (defence-in-depth).
+    group_attribute = "SQL-Group"
+
+    read_groups  = yes
+    read_profiles = yes
+
+    # Bring in the canonical MySQL query set. Points at
+    # queries.conf in the same directory.
+    $INCLUDE ${modconfdir}/${.:name}/main/${dialect}/queries.conf
+}

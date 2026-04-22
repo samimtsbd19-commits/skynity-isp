@@ -62,6 +62,20 @@ const ConfigSchema = z.object({
   // Public URL the admin panel is reachable at (used by the router
   // /tool/fetch pulls for config files). Falls back per-request.
   PUBLIC_BASE_URL: z.preprocess(emptyToUndef, z.string().optional()),
+
+  // --- RADIUS / AAA (optional) ---
+  // Host FreeRADIUS is reachable at from the backend container.
+  // In the default compose stack this is the service name
+  // `freeradius` on the internal docker network.
+  RADIUS_HOST: z.string().default('freeradius'),
+  RADIUS_AUTH_PORT: z.coerce.number().default(1812),
+  RADIUS_ACCT_PORT: z.coerce.number().default(1813),
+  RADIUS_COA_PORT:  z.coerce.number().default(3799),
+  // Shared secret backend uses when speaking directly to the
+  // FreeRADIUS `localhost` client (radtest health-checks, future
+  // CoA-to-self). NOT the per-NAS secret — that lives in the
+  // `nas` table.
+  RADIUS_LOCALHOST_SECRET: z.preprocess(emptyToUndef, z.string().optional()),
 });
 
 const parsed = ConfigSchema.safeParse(process.env);

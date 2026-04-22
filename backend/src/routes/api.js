@@ -26,6 +26,7 @@ import hotspotRouter from './hotspot.js';
 import guideRouter from './guide.js';
 import diagnosticsRouter from './diagnostics.js';
 import memoryRouter from './memory.js';
+import radiusRouter from './radius.js';
 import { sendExpiryReminders } from '../jobs/scheduler.js';
 import { bandwidthDaily } from '../services/bandwidth.js';
 import { renderInvoiceForOrder } from '../services/invoice.js';
@@ -60,6 +61,7 @@ router.use('/hotspot',           hotspotRouter);
 router.use('/guide',             guideRouter);
 router.use('/diagnostics',       diagnosticsRouter);
 router.use('/memory',            memoryRouter);
+router.use('/radius',            radiusRouter);
 
 // ------------------------------------------------------------
 // Manual "run now" for the expiry-reminder job. Handy right

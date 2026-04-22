@@ -75,6 +75,40 @@ router.get('/generate/pcq.rsc', requireAdmin, async (req, res) => {
   }
 });
 
+/** GET /api/configs/generate/radius.rsc — MikroTik RADIUS switchover script */
+router.get('/generate/radius.rsc', requireAdmin, async (req, res) => {
+  try {
+    const body = await gen.generateRadiusRsc({
+      radiusHost:     req.query.host         || undefined,
+      radiusSecret:   req.query.secret       || undefined,
+      coaPort:        req.query.coa_port     || undefined,
+      interimSecs:    req.query.interim      || undefined,
+      hotspotProfile: req.query.hs_profile   || undefined,
+    });
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment; filename="skynity-radius.rsc"');
+    res.send(body);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/** GET /api/configs/generate/radius-preview — same, as JSON for in-app preview */
+router.get('/generate/radius-preview', requireAdmin, async (req, res) => {
+  try {
+    const body = await gen.generateRadiusRsc({
+      radiusHost:     req.query.host         || undefined,
+      radiusSecret:   req.query.secret       || undefined,
+      coaPort:        req.query.coa_port     || undefined,
+      interimSecs:    req.query.interim      || undefined,
+      hotspotProfile: req.query.hs_profile   || undefined,
+    });
+    res.json({ rsc: body });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 /** GET /api/configs/generate/pcq-preview — text preview for the UI */
 router.get('/generate/pcq-preview', requireAdmin, async (req, res) => {
   try {

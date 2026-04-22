@@ -18,6 +18,7 @@ import suspensions from '../services/suspensions.js';
 import push from '../services/push.js';
 import ops from '../services/ops.js';
 import security from '../services/security.js';
+import radius from '../services/radius.js';
 import logger from '../utils/logger.js';
 
 async function guard(name, fn) {
@@ -342,6 +343,30 @@ export function startJobs() {
   // elapsed. Cheap query — no routers hit unless there's work.
   cron.schedule('* * * * *',    () => guard('liftExpired', () => suspensions.liftExpired())
     .catch((e) => logger.error({ e }, 'suspension auto-lift')));
+
+  // Every minute: drain the RADIUS CoA/PoD queue. No-op when
+  // feature.radius_enabled is false or the queue is empty.
+  cron.schedule('* * * * *',    () => guard('radiusCoaDrain', () => radius.drainDisconnectQueue())
+    .catch((e) => logger.error({ e }, 'radius coa drain')));
+
+  // Every 10 min: retry RADIUS sync for any active subscription
+  // whose radius_synced flipped to 0. Mirrors the MikroTik retry.
+  cron.schedule('*/10 * * * *', () => guard('radiusRetrySync', async () => {
+    if (!(await radius.isEnabled())) return;
+    const subs = await db.query(
+      `SELECT s.*, p.id AS _pkg_id
+         FROM subscriptions s JOIN packages p ON p.id = s.package_id
+        WHERE s.radius_synced = 0 AND s.status = 'active' LIMIT 50`
+    );
+    for (const s of subs) {
+      try {
+        const pkg = await db.queryOne('SELECT * FROM packages WHERE id = ?', [s._pkg_id]);
+        await radius.upsertUser(s, { pkg });
+      } catch (err) {
+        logger.warn({ err: err.message, subId: s.id }, 'radius retry failed');
+      }
+    }
+  }).catch((e) => logger.error({ e }, 'radius retry sync')));
 
 
   // Weekly: trim old security audit rows

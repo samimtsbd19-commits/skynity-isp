@@ -574,8 +574,145 @@ export async function generatePcqRsc(opts = {}) {
   return lines.join('\n');
 }
 
+// ============================================================
+// generateRadiusRsc(opts)
+// ------------------------------------------------------------
+// Produces a RouterOS script that wires the MikroTik up to the
+// Skynity FreeRADIUS server. It:
+//
+//   * /radius add                    (auth + acct + CoA)
+//   * /radius incoming set accept=yes port=3799
+//   * /ppp aaa set use-radius=yes accounting=yes interim-update=1m
+//   * /ip hotspot profile set <default-hs>  use-radius=yes
+//     accounting=yes interim-update=1m
+//   * /tool user-manager ...         (deliberately NOT touched —
+//                                     some operators keep MT user-
+//                                     manager for voucher hotspot.)
+//
+// opts:
+//   radiusHost   — VPS IP/DNS that MikroTik reaches RADIUS at
+//   radiusSecret — shared secret (matches `mikrotik_routers.radius_secret`
+//                  AND the row this backend will INSERT into `nas`)
+//   coaPort      — 3799 by default
+//   interimSecs  — accounting interim-update interval, default 60
+//   hotspotProfile — name of the hotspot server profile to flip, default 'skynity'
+// ============================================================
+export async function generateRadiusRsc(opts = {}) {
+  const [
+    brandRaw, confHost, confSecret, confInterim,
+  ] = await Promise.all([
+    settings.getSetting('site.name'),
+    settings.getSetting('radius.host'),
+    settings.getSetting('radius.default_secret'),
+    settings.getSetting('radius.accounting_interval'),
+  ]);
+  const brand        = brandRaw || 'Skynity ISP';
+  const radiusHost   = opts.radiusHost   || confHost     || '';
+  const radiusSecret = opts.radiusSecret || confSecret   || 'CHANGE_ME_shared_secret';
+  const coaPort      = Number(opts.coaPort || 3799) || 3799;
+  const interim      = Number(opts.interimSecs ?? confInterim ?? 60) || 60;
+  const hsProfile    = opts.hotspotProfile || 'skynity';
+
+  if (!radiusHost) {
+    throw new Error('radius.host is empty — set it in Settings → RADIUS or pass ?host=…');
+  }
+
+  const lines = [];
+  const out = (s = '') => lines.push(s);
+  const now = new Date().toISOString();
+
+  out('# ============================================================');
+  out(`# ${brand} — RADIUS / AAA switchover script`);
+  out(`# Generated: ${now}`);
+  out('#');
+  out('# Copy the contents of this file into a RouterOS terminal');
+  out('# (WinBox → New Terminal) OR drop the .rsc into Files and run:');
+  out('#   /import file-name=skynity-radius.rsc');
+  out('#');
+  out('# PREREQUISITES:');
+  out('#   * The VPS running FreeRADIUS is reachable from this router');
+  out('#     on UDP 1812 (auth) and UDP 1813 (accounting).');
+  out('#   * The shared secret below MUST match:');
+  out('#       mikrotik_routers.radius_secret  (Skynity DB)');
+  out('#       radius.default_secret            (Settings)');
+  out('#       nas.secret                        (FreeRADIUS DB row)');
+  out('#     Rotate it later via Settings → RADIUS — this script');
+  out('#     only seeds the FIRST value.');
+  out('#   * DO NOT run this on a production router until you have');
+  out('#     tested with a spare PPPoE secret first. See docs/RADIUS.md.');
+  out('# ============================================================');
+  out('');
+  out(':log info "skynity: enabling RADIUS";');
+  out('');
+
+  // Idempotent: remove any Skynity-managed RADIUS entries before re-adding
+  out('# 1) Purge any previous Skynity RADIUS client entries');
+  out('/radius');
+  out(':foreach r in=[find where comment~"skynity:radius"] do={ remove $r }');
+  out('');
+
+  // Add two entries: one for ppp, one for hotspot — MikroTik
+  // matches by `service` so a single row can cover both, but
+  // separating makes the per-service logs clearer.
+  out('# 2) Register FreeRADIUS as a RADIUS server for PPP + Hotspot');
+  out('/radius');
+  out(
+    `add service=ppp,hotspot ` +
+    `address=${rscEscape(radiusHost)} ` +
+    `secret="${rscEscape(radiusSecret)}" ` +
+    `authentication-port=1812 accounting-port=1813 ` +
+    `timeout=3s called-id="${rscEscape(brand)}" ` +
+    `comment="skynity:radius:primary"`
+  );
+  out('');
+
+  // Enable CoA listener so Skynity can issue disconnects via PoD
+  out('# 3) Allow incoming CoA / Disconnect on UDP/3799');
+  out('/radius incoming');
+  out(`set accept=yes port=${coaPort}`);
+  out('');
+
+  // Flip /ppp aaa onto RADIUS
+  out('# 4) PPPoE — use RADIUS for auth + accounting');
+  out('/ppp aaa');
+  out(`set use-radius=yes accounting=yes interim-update=${interim}s`);
+  out('');
+
+  // Hotspot profile — try the named one, otherwise apply to all
+  // user-created profiles (the built-in "default" is left alone).
+  out('# 5) Hotspot — use RADIUS on the Skynity profile');
+  out('/ip hotspot profile');
+  out(
+    `:if ([find name="${rscEscape(hsProfile)}"] != "") do={ ` +
+    `set [find name="${rscEscape(hsProfile)}"] use-radius=yes ` +
+    `} else={ ` +
+    `:log warning "skynity: hotspot profile '${rscEscape(hsProfile)}' not found — run setup.rsc first" ` +
+    `}`
+  );
+  out('');
+  out('# 6) Hotspot user-profile accounting — applies to every user profile');
+  out('/ip hotspot user profile');
+  out(`:foreach p in=[find] do={ set $p add-mac-cookie=yes }`);
+  out('');
+
+  out('# ============================================================');
+  out('# DONE. Verify with:');
+  out('#   /radius monitor 0');
+  out('#   /ppp aaa print');
+  out('#   /log print where topics~"radius"');
+  out('#');
+  out('# Roll back (if anything goes wrong):');
+  out('#   /ppp aaa set use-radius=no accounting=no');
+  out('#   /radius remove [find comment~"skynity:radius"]');
+  out('# ============================================================');
+  out('');
+
+  return lines.join('\n');
+}
+
 export default {
   generateSetupRsc,
   generatePortalHtml,
   generatePcqRsc,
+  generateRadiusRsc,
 };
