@@ -236,10 +236,8 @@ services:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      # `radiusd -Cx` does a one-shot config-check. If the daemon
-      # loaded its raddb tree and connected to MySQL without
-      # errors this exits 0.
-      test: ["CMD", "radiusd", "-Cx"]
+      # Official image runs live config from /opt/etc/raddb (not /etc/raddb).
+      test: ["CMD", "radiusd", "-Cx", "-d", "/opt/etc/raddb"]
       interval: 30s
       timeout: 10s
       retries: 5
