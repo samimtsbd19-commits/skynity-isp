@@ -58,7 +58,6 @@ server skynity {
         # sets Auth-Type = <proto> if the packet matches.
         chap
         mschap
-        pap
 
         # Pull the user from SQL. This fills Cleartext-Password
         # (from radcheck), any radreply attrs, and — via the
@@ -72,15 +71,22 @@ server skynity {
         expiration
         logintime
 
-        # If no password protocol matched but we have a
-        # Cleartext-Password, default to PAP.
+        # Listed last so CHAP/MS-CHAP can set Auth-Type first; PAP runs
+        # after SQL has supplied Cleartext-Password from radcheck.
         pap
     }
 
     authenticate {
-        Auth-Type PAP    { pap }
-        Auth-Type CHAP   { chap }
-        Auth-Type MS-CHAP { mschap }
+        Auth-Type PAP {
+            pap
+        }
+        Auth-Type CHAP {
+            chap
+        }
+        Auth-Type MS-CHAP {
+            mschap
+        }
+        mschap
     }
 
     preacct {

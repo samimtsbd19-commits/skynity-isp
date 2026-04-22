@@ -1,0 +1,49 @@
+# ============================================================
+# Skynity ISP — FreeRADIUS SQL module (template)
+# ------------------------------------------------------------
+# Rendered at container start via envsubst → mods-available/sql
+# Required env: DB_HOST DB_PORT DB_USER DB_PASSWORD DB_NAME
+# ============================================================
+
+sql {
+    driver      = "rlm_sql_mysql"
+    dialect     = "mysql"
+
+    server      = "${DB_HOST}"
+    port        = ${DB_PORT}
+    login       = "${DB_USER}"
+    password    = "${DB_PASSWORD}"
+    radius_db   = "${DB_NAME}"
+
+    acct_table1      = "radacct"
+    acct_table2      = "radacct"
+    postauth_table   = "radpostauth"
+    authcheck_table  = "radcheck"
+    authreply_table  = "radreply"
+    groupcheck_table = "radgroupcheck"
+    groupreply_table = "radgroupreply"
+    usergroup_table  = "radusergroup"
+
+    delete_stale_sessions = yes
+
+    pool {
+        start       = 2
+        min         = 2
+        max         = 16
+        spare       = 4
+        uses        = 0
+        retry_delay = 30
+        lifetime    = 0
+        idle_timeout = 60
+    }
+
+    read_clients = yes
+    client_table = "nas"
+
+    group_attribute = "SQL-Group"
+
+    read_groups  = yes
+    read_profiles = yes
+
+    $INCLUDE ${modconfdir}/${.:name}/main/${dialect}/queries.conf
+}

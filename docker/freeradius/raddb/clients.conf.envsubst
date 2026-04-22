@@ -1,0 +1,22 @@
+# ============================================================
+# Skynity ISP — RADIUS client list (template)
+# ------------------------------------------------------------
+# Rendered at container start → clients.conf
+# Required env: RADIUS_LOCALHOST_SECRET
+# ============================================================
+
+client localhost {
+    ipaddr      = 127.0.0.1
+    secret      = "${RADIUS_LOCALHOST_SECRET}"
+    require_message_authenticator = no
+    nas_type    = other
+    shortname   = skynity-local
+}
+
+client docker-internal {
+    ipaddr      = 172.16.0.0/12
+    secret      = "${RADIUS_LOCALHOST_SECRET}"
+    require_message_authenticator = no
+    nas_type    = other
+    shortname   = skynity-docker
+}

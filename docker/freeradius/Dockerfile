@@ -13,6 +13,12 @@
 # Hub tags use full patch versions (e.g. 3.2.8-alpine); `3.2-alpine` is not published.
 FROM freeradius/freeradius-server:3.2.8-alpine
 
+# envsubst renders sql.envsubst + clients.conf.envsubst at container start
+RUN apk add --no-cache gettext
+
+COPY docker-entrypoint-skynity.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint-skynity.sh
+
 # Dict / SQL module / site / clients overlay
 COPY raddb/ /etc/raddb/
 
@@ -29,7 +35,7 @@ RUN set -eux; \
     done; \
     if [ -z "$OWNER" ]; then echo "Could not resolve FreeRADIUS UNIX user"; exit 1; fi; \
     chown -R "$OWNER:$OWNER" /etc/raddb; \
-    chmod 640 /etc/raddb/clients.conf /etc/raddb/mods-available/sql 2>/dev/null || true; \
+    chmod 640 /etc/raddb/clients.conf.envsubst /etc/raddb/mods-available/sql.envsubst 2>/dev/null || true; \
     # Enable the SQL module + Skynity site (symlinks)
     ln -sf /etc/raddb/mods-available/sql   /etc/raddb/mods-enabled/sql; \
     ln -sf /etc/raddb/sites-available/skynity /etc/raddb/sites-enabled/skynity; \
@@ -40,6 +46,8 @@ RUN set -eux; \
 EXPOSE 1812/udp
 EXPOSE 1813/udp
 EXPOSE 3799/udp
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint-skynity.sh"]
 
 # -X keeps FreeRADIUS in the foreground with debug logging on
 # stdout, which is exactly what `docker compose logs freeradius`
