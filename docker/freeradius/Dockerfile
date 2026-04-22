@@ -10,7 +10,8 @@
 # Our overlay replaces only the files we care about; everything
 # else (users, eap, dhcp, etc.) keeps the vendor defaults.
 # ============================================================
-FROM freeradius/freeradius-server:3.2-alpine
+# Hub tags use full patch versions (e.g. 3.2.8-alpine); `3.2-alpine` is not published.
+FROM freeradius/freeradius-server:3.2.8-alpine
 
 # Dict / SQL module / site / clients overlay
 COPY raddb/ /etc/raddb/
