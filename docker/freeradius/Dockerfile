@@ -16,13 +16,18 @@ FROM freeradius/freeradius-server:3.2.8-alpine
 # Dict / SQL module / site / clients overlay
 COPY raddb/ /etc/raddb/
 
-# Permissions: vendor Alpine image uses `radius` (not `radiusd`); Debian uses `freerad`.
+# The Hub `*-alpine` image often has no passwd entries for radius*; create the
+# standard Alpine account, then match Debian/RHEL names if present.
 RUN set -eux; \
+    if ! id radius >/dev/null 2>&1 && ! id freerad >/dev/null 2>&1 && ! id radiusd >/dev/null 2>&1; then \
+      addgroup -S radius; \
+      adduser -S -D -H -h /etc/raddb -G radius radius; \
+    fi; \
     OWNER=; \
     for U in radius freerad radiusd; do \
       if id -u "$U" >/dev/null 2>&1; then OWNER=$U; break; fi; \
     done; \
-    if [ -z "$OWNER" ]; then echo "No FreeRADIUS UNIX user in base image"; exit 1; fi; \
+    if [ -z "$OWNER" ]; then echo "Could not resolve FreeRADIUS UNIX user"; exit 1; fi; \
     chown -R "$OWNER:$OWNER" /etc/raddb; \
     chmod 640 /etc/raddb/clients.conf /etc/raddb/mods-available/sql 2>/dev/null || true; \
     # Enable the SQL module + Skynity site (symlinks)
