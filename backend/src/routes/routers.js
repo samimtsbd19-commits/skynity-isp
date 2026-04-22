@@ -17,17 +17,19 @@ router.post('/', requireAdmin, requireRole('superadmin', 'admin'), async (req, r
   const required = ['name', 'host', 'username', 'password'];
   for (const k of required) if (!b[k]) return res.status(400).json({ error: `missing ${k}` });
   try {
+    // Match PATCH + POST /api/radius/nas: ciphertext in radius_secret_enc, not radius_secret_plain.
     const radiusEnc = b.radius_secret ? encrypt(b.radius_secret) : null;
     const r = await db.query(
       `INSERT INTO mikrotik_routers
          (name, host, port, username, password_enc, use_ssl, is_default, is_active, note,
           radius_enabled, radius_secret_plain, radius_secret_enc, radius_nas_ip, radius_nas_shortname, radius_coa_port)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
       [
         b.name, b.host, b.port || 443, b.username,
         encrypt(b.password), b.use_ssl === false ? 0 : 1,
         b.is_default ? 1 : 0, b.note || null,
         b.radius_enabled ? 1 : 0,
+        null,
         radiusEnc,
         b.radius_nas_ip || null,
         b.radius_nas_shortname || b.name,
