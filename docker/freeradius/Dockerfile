@@ -41,7 +41,9 @@ RUN set -eux; \
     ln -sf /etc/raddb/mods-available/sql   /etc/raddb/mods-enabled/sql; \
     ln -sf /etc/raddb/sites-available/skynity /etc/raddb/sites-enabled/skynity; \
     # The stock "default" / "inner-tunnel" sites are redundant for us.
-    rm -f /etc/raddb/sites-enabled/default /etc/raddb/sites-enabled/inner-tunnel 2>/dev/null || true
+    rm -f /etc/raddb/sites-enabled/default /etc/raddb/sites-enabled/inner-tunnel 2>/dev/null || true; \
+    # EAP requires Auth-Type EAP in a virtual server; we only use PAP/CHAP/MS-CHAP for NAS.
+    rm -f /etc/raddb/mods-enabled/eap 2>/dev/null || true
 
 # Standard RADIUS ports
 EXPOSE 1812/udp
