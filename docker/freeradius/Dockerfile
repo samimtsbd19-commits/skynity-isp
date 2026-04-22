@@ -13,8 +13,9 @@
 # Hub tags use full patch versions (e.g. 3.2.8-alpine); `3.2-alpine` is not published.
 FROM freeradius/freeradius-server:3.2.8-alpine
 
-# envsubst renders sql.envsubst + clients.conf.envsubst at container start
-RUN apk add --no-cache gettext
+# gettext: envsubst for sql/clients templates.
+# mariadb-connector-c: libmariadb.so.3 for rlm_sql_mysql (not in slim base image).
+RUN apk add --no-cache gettext mariadb-connector-c
 
 COPY docker-entrypoint-skynity.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint-skynity.sh
