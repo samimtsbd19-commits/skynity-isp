@@ -161,6 +161,7 @@ export async function queryPayment(paymentID) {
 
 export default {
   isApiEnabled,
+  isCheckoutReady,
   credentialsConfigured,
   getToken,
   createPayment,
