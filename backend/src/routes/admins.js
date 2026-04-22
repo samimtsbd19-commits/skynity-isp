@@ -26,11 +26,18 @@ router.post('/', requireAdmin, requireRole('superadmin'), async (req, res) => {
     return res.status(400).json({ error: 'invalid role' });
   }
   const hash = await bcrypt.hash(b.password, 10);
+  const parentId = b.role === 'reseller' ? req.admin.id : null;
+  const commission = Number(b.commission_pct) || 0;
   try {
     const r = await db.query(
-      `INSERT INTO admins (username, password_hash, full_name, telegram_id, role, is_active)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [b.username, hash, b.full_name, b.telegram_id || null, b.role, b.is_active === false ? 0 : 1]
+      `INSERT INTO admins (username, password_hash, full_name, telegram_id, role, is_active, reseller_parent_id, commission_pct)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        b.username, hash, b.full_name, b.telegram_id || null, b.role,
+        b.is_active === false ? 0 : 1,
+        parentId,
+        commission,
+      ]
     );
     res.json({ id: r.insertId });
   } catch (err) { res.status(400).json({ error: err.message }); }
@@ -39,7 +46,7 @@ router.post('/', requireAdmin, requireRole('superadmin'), async (req, res) => {
 router.patch('/:id', requireAdmin, requireRole('superadmin'), async (req, res) => {
   const id = Number(req.params.id);
   const b = req.body || {};
-  const allowed = ['full_name', 'telegram_id', 'role', 'is_active'];
+  const allowed = ['full_name', 'telegram_id', 'role', 'is_active', 'commission_pct', 'reseller_parent_id'];
   const entries = Object.entries(b).filter(([k]) => allowed.includes(k));
   if (b.password) {
     if (String(b.password).length < 8) return res.status(400).json({ error: 'password must be 8+ chars' });

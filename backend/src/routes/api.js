@@ -1,8 +1,11 @@
 import { Router } from 'express';
+import crypto from 'node:crypto';
 import bcrypt from 'bcrypt';
 import db from '../database/pool.js';
-import { signAdminToken, requireAdmin, requireRole } from '../middleware/auth.js';
+import { signAdminToken, requireAdmin, requireRole, resellerScope } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
+import redis from '../utils/redisClient.js';
+import twoFactor from '../services/twoFactor.js';
 import { approveOrderAndProvision, rejectOrder, extendSubscription } from '../services/provisioning.js';
 import { getMikrotikClient } from '../mikrotik/client.js';
 import configsRouter from './configs.js';
@@ -27,12 +30,34 @@ import guideRouter from './guide.js';
 import diagnosticsRouter from './diagnostics.js';
 import memoryRouter from './memory.js';
 import radiusRouter from './radius.js';
+import accessPointsRouter from './accessPoints.js';
 import { sendExpiryReminders } from '../jobs/scheduler.js';
 import { bandwidthDaily } from '../services/bandwidth.js';
 import { renderInvoiceForOrder } from '../services/invoice.js';
 import security from '../services/security.js';
 
 const router = Router();
+
+const apiRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 300,
+  message: 'Too many requests',
+  keyFn: (req) => `api:${req.ip}`,
+});
+router.use(apiRateLimit);
+
+const portalRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  message: 'Too many portal requests',
+  keyFn: (req) => `portal:${req.ip}`,
+});
+
+const radiusCoaRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  keyFn: (req) => `radius-coa:${req.admin?.id || req.ip}`,
+});
 
 function clientIp(req) {
   const xf = req.headers['x-forwarded-for'];
@@ -61,7 +86,8 @@ router.use('/hotspot',           hotspotRouter);
 router.use('/guide',             guideRouter);
 router.use('/diagnostics',       diagnosticsRouter);
 router.use('/memory',            memoryRouter);
-router.use('/radius',            radiusRouter);
+router.use('/radius',            radiusCoaRateLimit, radiusRouter);
+router.use('/access-points',     accessPointsRouter);
 
 // ------------------------------------------------------------
 // Manual "run now" for the expiry-reminder job. Handy right
@@ -73,7 +99,7 @@ router.post('/jobs/expiry-reminders/run', requireAdmin, async (_req, res) => {
 });
 
 // PUBLIC (no auth) — self-service customer portal
-router.use('/portal',   portalRouter);
+router.use('/portal',   portalRateLimit, portalRouter);
 
 // ------------------------------------------------------------
 // Invoice (admin side — for any order)
@@ -144,14 +170,91 @@ router.post('/auth/login', loginRateLimit, async (req, res) => {
     adminId: admin.id,
     subject: username,
   });
+
+  if (Number(admin.totp_enabled) === 1) {
+    const sessionId = crypto.randomBytes(16).toString('hex');
+    await redis.setex(`2fa:${sessionId}`, 300, String(admin.id));
+    return res.json({ needs_2fa: true, session_id: sessionId });
+  }
+
   const token = signAdminToken(admin);
   res.json({
     token,
-    admin: { id: admin.id, username: admin.username, full_name: admin.full_name, role: admin.role },
+    admin: {
+      id: admin.id,
+      username: admin.username,
+      full_name: admin.full_name,
+      role: admin.role,
+      must_change_password: !!admin.must_change_password,
+      totp_enabled: !!admin.totp_enabled,
+    },
   });
 });
 
-router.get('/auth/me', requireAdmin, (req, res) => res.json(req.admin));
+router.post('/auth/login/2fa', loginRateLimit, async (req, res) => {
+  const { session_id, code } = req.body || {};
+  if (!session_id || !code) return res.status(400).json({ error: 'session_id and code required' });
+  const ip = clientIp(req);
+  const adminIdStr = await redis.get(`2fa:${session_id}`);
+  if (!adminIdStr) return res.status(401).json({ error: 'session expired' });
+  const adminId = Number(adminIdStr);
+  const ok = await twoFactor.verify(adminId, code);
+  if (!ok) {
+    await security.logSecurityEvent({
+      eventType: 'admin_2fa_fail',
+      severity: 'warning',
+      adminId,
+      ip,
+    });
+    return res.status(401).json({ error: 'invalid 2fa code' });
+  }
+  await redis.del(`2fa:${session_id}`);
+  const admin = await db.queryOne('SELECT * FROM admins WHERE id = ?', [adminId]);
+  if (!admin?.is_active) return res.status(401).json({ error: 'invalid admin' });
+  const token = signAdminToken(admin);
+  res.json({
+    token,
+    admin: {
+      id: admin.id,
+      username: admin.username,
+      full_name: admin.full_name,
+      role: admin.role,
+      must_change_password: !!admin.must_change_password,
+      totp_enabled: !!admin.totp_enabled,
+    },
+  });
+});
+
+router.get('/auth/me', requireAdmin, (req, res) => res.json({
+  ...req.admin,
+  must_change_password: !!req.admin.must_change_password,
+  totp_enabled: !!req.admin.totp_enabled,
+}));
+
+router.post('/auth/2fa/setup', requireAdmin, async (req, res) => {
+  try {
+    res.json(await twoFactor.beginEnrollment(req.admin));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/auth/2fa/verify', requireAdmin, async (req, res) => {
+  try {
+    res.json(await twoFactor.confirmEnrollment(req.admin.id, req.body?.code));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/auth/2fa/disable', requireAdmin, async (req, res) => {
+  const admin = await db.queryOne('SELECT password_hash FROM admins WHERE id = ?', [req.admin.id]);
+  if (!await bcrypt.compare(req.body?.password || '', admin.password_hash)) {
+    return res.status(401).json({ error: 'password incorrect' });
+  }
+  await twoFactor.disable(req.admin.id);
+  res.json({ ok: true });
+});
 
 router.post('/auth/change-password', requireAdmin, async (req, res) => {
   const { current_password, new_password } = req.body || {};
@@ -165,7 +268,10 @@ router.post('/auth/change-password', requireAdmin, async (req, res) => {
   const ok = await bcrypt.compare(current_password, row.password_hash);
   if (!ok) return res.status(401).json({ error: 'invalid current password' });
   const hash = await bcrypt.hash(new_password, 10);
-  await db.query('UPDATE admins SET password_hash = ? WHERE id = ?', [hash, req.admin.id]);
+  await db.query(
+    'UPDATE admins SET password_hash = ?, must_change_password = 0 WHERE id = ?',
+    [hash, req.admin.id]
+  );
   await db.query(
     `INSERT INTO activity_log (actor_type, actor_id, action, entity_type, entity_id, meta)
      VALUES ('admin', ?, 'password_changed', 'admin', ?, NULL)`,
@@ -198,16 +304,38 @@ router.get('/routers', requireAdmin, async (_req, res) => {
 // ===================== DASHBOARD =====================
 router.get('/stats', requireAdmin, async (req, res) => {
   const rid = routerIdFromQuery(req.query);
+  const rs = resellerScope(req);
+  const rsPay = resellerScope(req, 'o');
+  const payToday = [
+    `SELECT COALESCE(SUM(pm.amount),0) AS s FROM payments pm JOIN orders o ON o.id = pm.order_id
+      WHERE pm.status = 'verified' AND DATE(pm.verified_at) = CURDATE() ${rsPay.sql}`,
+    rsPay.params,
+  ];
+  const payAll = [
+    `SELECT COALESCE(SUM(pm.amount),0) AS s FROM payments pm JOIN orders o ON o.id = pm.order_id
+      WHERE pm.status = 'verified' ${rsPay.sql}`,
+    rsPay.params,
+  ];
   const [
     customers, activeSubs, pendingOrders, todayRevenue, totalRevenue,
     expiringSoon, onlinePpp, onlineHs,
   ] = await Promise.all([
-    db.queryOne(`SELECT COUNT(*) AS c FROM customers`),
-    db.queryOne(`SELECT COUNT(*) AS c FROM subscriptions WHERE status = 'active' AND expires_at > NOW()`),
-    db.queryOne(`SELECT COUNT(*) AS c FROM orders WHERE status = 'payment_submitted'`),
-    db.queryOne(`SELECT COALESCE(SUM(amount),0) AS s FROM payments WHERE status = 'verified' AND DATE(verified_at) = CURDATE()`),
-    db.queryOne(`SELECT COALESCE(SUM(amount),0) AS s FROM payments WHERE status = 'verified'`),
-    db.queryOne(`SELECT COUNT(*) AS c FROM subscriptions WHERE status = 'active' AND expires_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 3 DAY)`),
+    db.queryOne(`SELECT COUNT(*) AS c FROM customers WHERE 1=1 ${rs.sql}`, rs.params),
+    db.queryOne(
+      `SELECT COUNT(*) AS c FROM subscriptions s WHERE s.status = 'active' AND s.expires_at > NOW() ${resellerScope(req, 's').sql}`,
+      resellerScope(req, 's').params
+    ),
+    db.queryOne(
+      `SELECT COUNT(*) AS c FROM orders o WHERE o.status = 'payment_submitted' ${resellerScope(req, 'o').sql}`,
+      resellerScope(req, 'o').params
+    ),
+    db.queryOne(...payToday),
+    db.queryOne(...payAll),
+    db.queryOne(
+      `SELECT COUNT(*) AS c FROM subscriptions s WHERE s.status = 'active'
+         AND s.expires_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 3 DAY) ${resellerScope(req, 's').sql}`,
+      resellerScope(req, 's').params
+    ),
     (async () => { try { const mt = await getMikrotikClient(rid); const a = await mt.listPppActive(); return a.length; } catch { return null; } })(),
     (async () => { try { const mt = await getMikrotikClient(rid); const a = await mt.listHotspotActive(); return a.length; } catch { return null; } })(),
   ]);
@@ -242,18 +370,22 @@ router.get('/stats', requireAdmin, async (req, res) => {
 // ============================================================
 router.get('/stats/revenue', requireAdmin, async (req, res) => {
   const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+  const rsO = resellerScope(req, 'o');
+  const rsC = resellerScope(req, 'c');
 
   const [series, byPackage, byMethod, totals, newCustomers] = await Promise.all([
     db.query(
-      `SELECT DATE(verified_at) AS d,
-              COALESCE(SUM(amount), 0) AS revenue,
+      `SELECT DATE(pm.verified_at) AS d,
+              COALESCE(SUM(pm.amount), 0) AS revenue,
               COUNT(*) AS orders
-         FROM payments
-        WHERE status = 'verified'
-          AND verified_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-        GROUP BY DATE(verified_at)
+         FROM payments pm
+         JOIN orders o ON o.id = pm.order_id
+        WHERE pm.status = 'verified'
+          AND pm.verified_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+          ${rsO.sql}
+        GROUP BY DATE(pm.verified_at)
         ORDER BY d ASC`,
-      [days - 1]
+      [days - 1, ...rsO.params]
     ),
     db.query(
       `SELECT pk.code, pk.name,
@@ -264,32 +396,37 @@ router.get('/stats/revenue', requireAdmin, async (req, res) => {
          JOIN packages pk ON pk.id = o.package_id
         WHERE pm.status = 'verified'
           AND pm.verified_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+          ${rsO.sql}
         GROUP BY pk.id
         ORDER BY revenue DESC`,
-      [days - 1]
+      [days - 1, ...rsO.params]
     ),
     db.query(
-      `SELECT method,
-              COALESCE(SUM(amount), 0) AS revenue,
+      `SELECT pm.method,
+              COALESCE(SUM(pm.amount), 0) AS revenue,
               COUNT(*) AS orders
-         FROM payments
-        WHERE status = 'verified'
-          AND verified_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-        GROUP BY method
+         FROM payments pm
+         JOIN orders o ON o.id = pm.order_id
+        WHERE pm.status = 'verified'
+          AND pm.verified_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+          ${rsO.sql}
+        GROUP BY pm.method
         ORDER BY revenue DESC`,
-      [days - 1]
+      [days - 1, ...rsO.params]
     ),
     db.queryOne(
-      `SELECT COALESCE(SUM(amount), 0) AS revenue, COUNT(*) AS orders
-         FROM payments
-        WHERE status = 'verified'
-          AND verified_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)`,
-      [days - 1]
+      `SELECT COALESCE(SUM(pm.amount), 0) AS revenue, COUNT(*) AS orders
+         FROM payments pm
+         JOIN orders o ON o.id = pm.order_id
+        WHERE pm.status = 'verified'
+          AND pm.verified_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+          ${rsO.sql}`,
+      [days - 1, ...rsO.params]
     ),
     db.queryOne(
-      `SELECT COUNT(*) AS c FROM customers
-        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)`,
-      [days - 1]
+      `SELECT COUNT(*) AS c FROM customers c
+        WHERE c.created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY) ${rsC.sql}`,
+      [days - 1, ...rsC.params]
     ),
   ]);
 
@@ -333,10 +470,12 @@ router.get('/customers', requireAdmin, async (req, res) => {
   const { q } = req.query;
   const limitN = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
   const offsetN = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-  const params = [];
-  let where = '';
+  const rs = resellerScope(req, 'c');
+  const params = [...rs.params];
+  let where = 'WHERE 1=1';
+  where += rs.sql;
   if (q) {
-    where = `WHERE c.full_name LIKE ? OR c.phone LIKE ? OR c.customer_code LIKE ?`;
+    where += ` AND (c.full_name LIKE ? OR c.phone LIKE ? OR c.customer_code LIKE ?)`;
     const like = `%${q}%`;
     params.push(like, like, like);
   }
@@ -358,6 +497,9 @@ router.get('/customers', requireAdmin, async (req, res) => {
 router.get('/customers/:id', requireAdmin, async (req, res) => {
   const customer = await db.queryOne('SELECT * FROM customers WHERE id = ?', [req.params.id]);
   if (!customer) return res.status(404).json({ error: 'not found' });
+  if (req.admin.role === 'reseller' && Number(customer.reseller_id) !== Number(req.admin.id)) {
+    return res.status(404).json({ error: 'not found' });
+  }
   const subs = await db.query(
     `SELECT s.*, p.name AS package_name, p.code AS package_code
      FROM subscriptions s JOIN packages p ON p.id = s.package_id
@@ -377,9 +519,11 @@ router.get('/orders', requireAdmin, async (req, res) => {
   const { status } = req.query;
   const limitN = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
   const offsetN = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-  const params = [];
-  let where = '';
-  if (status) { where = 'WHERE o.status = ?'; params.push(status); }
+  const rs = resellerScope(req, 'o');
+  const params = [...rs.params];
+  let where = 'WHERE 1=1';
+  where += rs.sql;
+  if (status) { where += ' AND o.status = ?'; params.push(status); }
   const rows = await db.query(
     `SELECT o.*, p.name AS package_name, p.code AS package_code, c.full_name AS customer_name
      FROM orders o
@@ -397,7 +541,7 @@ router.post('/orders/:id/approve', requireAdmin, async (req, res) => {
   try {
     const result = await approveOrderAndProvision({
       orderId: Number(req.params.id),
-      adminId: req.admin.id,
+      admin: req.admin,
     });
     res.json(result);
   } catch (err) { res.status(400).json({ error: err.message }); }
@@ -424,11 +568,16 @@ router.post('/packages', requireAdmin, requireRole('superadmin', 'admin'), async
   const b = req.body || {};
   const required = ['code', 'name', 'service_type', 'rate_up_mbps', 'rate_down_mbps', 'duration_days', 'price', 'mikrotik_profile'];
   for (const k of required) if (b[k] === undefined) return res.status(400).json({ error: `missing ${k}` });
+  let quota = null;
+  if (b.monthly_quota_gb != null && b.monthly_quota_gb !== '') {
+    const n = parseInt(b.monthly_quota_gb, 10);
+    if (Number.isFinite(n)) quota = Math.max(0, n);
+  }
 
   const r = await db.query(
-    `INSERT INTO packages (code, name, service_type, rate_up_mbps, rate_down_mbps, duration_days, price, mikrotik_profile, description, sort_order, is_active)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-    [b.code, b.name, b.service_type, b.rate_up_mbps, b.rate_down_mbps, b.duration_days, b.price, b.mikrotik_profile, b.description || null, b.sort_order || 100]
+    `INSERT INTO packages (code, name, service_type, rate_up_mbps, rate_down_mbps, duration_days, price, mikrotik_profile, description, sort_order, is_active, monthly_quota_gb)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+    [b.code, b.name, b.service_type, b.rate_up_mbps, b.rate_down_mbps, b.duration_days, b.price, b.mikrotik_profile, b.description || null, b.sort_order || 100, quota]
   );
   res.json({ id: r.insertId });
 });
@@ -436,7 +585,7 @@ router.post('/packages', requireAdmin, requireRole('superadmin', 'admin'), async
 router.patch('/packages/:id', requireAdmin, requireRole('superadmin', 'admin'), async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid id' });
-  const allowed = ['name', 'rate_up_mbps', 'rate_down_mbps', 'duration_days', 'price', 'mikrotik_profile', 'description', 'sort_order', 'is_active'];
+  const allowed = ['name', 'rate_up_mbps', 'rate_down_mbps', 'duration_days', 'price', 'mikrotik_profile', 'description', 'sort_order', 'is_active', 'monthly_quota_gb'];
   const updates = Object.entries(req.body || {}).filter(([k]) => allowed.includes(k));
   if (!updates.length) return res.status(400).json({ error: 'nothing to update' });
   const set = updates.map(([k]) => `${k} = ?`).join(', ');
@@ -449,9 +598,11 @@ router.get('/subscriptions', requireAdmin, async (req, res) => {
   const { status } = req.query;
   const limitN = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
   const offsetN = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-  const params = [];
-  let where = '';
-  if (status) { where = 'WHERE s.status = ?'; params.push(status); }
+  const rs = resellerScope(req, 's');
+  const params = [...rs.params];
+  let where = 'WHERE 1=1';
+  where += rs.sql;
+  if (status) { where += ' AND s.status = ?'; params.push(status); }
   const rows = await db.query(
     `SELECT s.*, c.full_name, c.phone, c.customer_code, p.name AS package_name, p.code AS package_code
      FROM subscriptions s
@@ -463,6 +614,31 @@ router.get('/subscriptions', requireAdmin, async (req, res) => {
     params
   );
   res.json({ subscriptions: rows });
+});
+
+router.get('/subscriptions/:id/quota', requireAdmin, async (req, res) => {
+  const row = await db.queryOne(
+    `SELECT s.quota_used_gb, s.quota_throttled, s.quota_reset_at,
+            p.monthly_quota_gb
+       FROM subscriptions s JOIN packages p ON p.id = s.package_id
+      WHERE s.id = ?`,
+    [req.params.id]
+  );
+  if (!row) return res.status(404).json({ error: 'not found' });
+  if (req.admin.role === 'reseller') {
+    const sub = await db.queryOne('SELECT reseller_id FROM subscriptions WHERE id = ?', [req.params.id]);
+    if (Number(sub?.reseller_id) !== Number(req.admin.id)) {
+      return res.status(404).json({ error: 'not found' });
+    }
+  }
+  const lim = row.monthly_quota_gb != null ? Number(row.monthly_quota_gb) : null;
+  res.json({
+    used_gb: Number(row.quota_used_gb),
+    limit_gb: lim,
+    throttled: !!row.quota_throttled,
+    reset_at: row.quota_reset_at,
+    percent: lim ? (Number(row.quota_used_gb) / lim) * 100 : null,
+  });
 });
 
 // POST /subscriptions/:id/extend — admin manually adds N days

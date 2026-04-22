@@ -8,7 +8,8 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "migrate": "node src/database/migrate.js",
-    "bot": "node src/telegram/bot.js"
+    "bot": "node src/telegram/bot.js",
+    "test": "vitest run"
   },
   "dependencies": {
     "axios": "^1.7.7",
@@ -24,14 +25,17 @@
     "net-snmp": "^3.26.1",
     "node-cron": "^3.0.3",
     "node-telegram-bot-api": "^0.66.0",
+    "otplib": "^13.4.0",
     "pino": "^9.5.0",
     "pino-pretty": "^11.3.0",
+    "qrcode": "^1.5.4",
     "uuid": "^11.0.3",
     "ws": "^8.18.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "nodemon": "^3.1.7"
+    "nodemon": "^3.1.7",
+    "vitest": "^3.0.5"
   },
   "engines": {
     "node": ">=20.0.0"

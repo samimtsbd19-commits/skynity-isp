@@ -14,8 +14,9 @@
 //   suggestion   plain text/markdown guide for the admin
 // ============================================================
 import db from '../database/pool.js';
-import { getSetting } from './settings.js';
+import { getSetting, setSetting } from './settings.js';
 import logger from '../utils/logger.js';
+import { notifyAdmins } from '../telegram/bot.js';
 
 // ------------------------------------------------------------
 // Low-level helpers
@@ -96,6 +97,32 @@ async function checkDatabase() {
   }
 }
 
+async function maybeTelegramRouterOffline(router) {
+  try {
+    if (!(await getSetting('feature.router_offline_telegram'))) return;
+    const raw = (await getSetting('health.router_offline_last_alert_json')) || '{}';
+    let map = {};
+    try { map = JSON.parse(raw); } catch { map = {}; }
+    const rid = String(router.id);
+    const last = Number(map[rid] || 0);
+    const now = Date.now();
+    const coolMin = Number(await getSetting('health.router_offline_alert_cooldown_min')) || 30;
+    if (now - last < coolMin * 60 * 1000) return;
+    map[rid] = now;
+    await setSetting({
+      key: 'health.router_offline_last_alert_json',
+      value: JSON.stringify(map),
+      type: 'string',
+      updatedBy: null,
+    });
+    await notifyAdmins(
+      `*Router offline*\n"${router.name}" (${router.host})\nNo fresh metrics for 15+ minutes.`,
+    );
+  } catch (err) {
+    logger.warn({ err: err.message }, 'router offline telegram alert failed');
+  }
+}
+
 // ------------------------------------------------------------
 // Router checks — CPU / RAM / temp / reachability
 // ------------------------------------------------------------
@@ -131,7 +158,10 @@ async function checkRouterThresholds() {
         '4. On the router: `/ip service print` — is www-ssl (or www) enabled?',
       ].join('\n'),
     });
-    if (offline) continue;
+    if (offline) {
+      await maybeTelegramRouterOffline(r);
+      continue;
+    }
 
     // CPU
     const cpu = Number(latest.cpu_load) || 0;

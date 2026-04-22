@@ -2,6 +2,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+RUN apk add --no-cache mysql-client gzip tar iputils
+
 # Install deps first for better caching
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev

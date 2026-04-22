@@ -8,9 +8,11 @@
 
 import cron from 'node-cron';
 import db from '../database/pool.js';
+import config from '../config/index.js';
 import { expireSubscription } from '../services/provisioning.js';
 import { getMikrotikClient } from '../mikrotik/client.js';
 import { getSetting } from '../services/settings.js';
+import { notifyAdmins } from '../telegram/bot.js';
 import notifier from '../services/notifier.js';
 import monitoring from '../services/monitoring.js';
 import health from '../services/health.js';
@@ -19,6 +21,8 @@ import push from '../services/push.js';
 import ops from '../services/ops.js';
 import security from '../services/security.js';
 import radius from '../services/radius.js';
+import quota from '../services/quota.js';
+import { runDailyBackup } from './backup.js';
 import logger from '../utils/logger.js';
 
 async function guard(name, fn) {
@@ -187,6 +191,7 @@ async function snapshotUsage(subscriptionId, routerId, serviceType, active) {
         WHERE id = ?`,
       [deltaIn.toString(), deltaOut.toString(), subscriptionId]
     );
+    await quota.addUsage(subscriptionId, deltaIn, deltaOut);
   }
 }
 
@@ -311,6 +316,56 @@ async function sendExpiryReminders() {
   }
 }
 
+/** Morning summary to admins (enable with system setting `feature.telegram_daily_digest`). */
+async function dailyAdminDigest() {
+  if (!(await getSetting('feature.telegram_daily_digest'))) return;
+  try {
+    const [rev, newCust, activeSub, exp3, pendOrd, susp] = await Promise.all([
+      db.queryOne(
+        `SELECT COALESCE(SUM(amount),0) AS s, COUNT(*) AS c FROM payments
+         WHERE status = 'verified' AND DATE(COALESCE(verified_at, created_at)) = CURDATE()`
+      ),
+      db.queryOne(`SELECT COUNT(*) AS c FROM customers WHERE DATE(created_at) = CURDATE()`),
+      db.queryOne(`SELECT COUNT(*) AS c FROM subscriptions WHERE status = 'active'`),
+      db.queryOne(
+        `SELECT COUNT(*) AS c FROM subscriptions
+          WHERE status = 'active' AND expires_at > NOW() AND expires_at <= NOW() + INTERVAL 3 DAY`
+      ),
+      db.queryOne(
+        `SELECT COUNT(*) AS c FROM orders WHERE status IN ('pending_payment','payment_submitted')`
+      ),
+      db.queryOne(`SELECT COUNT(*) AS c FROM subscriptions WHERE status = 'suspended'`),
+    ]);
+
+    let online = 'n/a';
+    try {
+      const mt = await getMikrotikClient();
+      const [ppp, hs] = await Promise.all([
+        mt.listPppActive().catch(() => []),
+        mt.listHotspotActive().catch(() => []),
+      ]);
+      online = String((ppp?.length || 0) + (hs?.length || 0));
+    } catch {
+      online = 'n/a';
+    }
+
+    const sym = config.CURRENCY_SYMBOL || '৳';
+    const lines = [
+      '*Daily digest*',
+      `Revenue today: ${sym}${Number(rev?.s || 0).toFixed(0)} (${Number(rev?.c || 0)} payments)`,
+      `New customers today: ${Number(newCust?.c || 0)}`,
+      `Active subscriptions: ${Number(activeSub?.c || 0)}`,
+      `Expiring in 3 days: ${Number(exp3?.c || 0)}`,
+      `Suspended: ${Number(susp?.c || 0)}`,
+      `Pending orders: ${Number(pendOrd?.c || 0)}`,
+      `Online sessions (default router): ${online}`,
+    ];
+    await notifyAdmins(lines.join('\n'));
+  } catch (err) {
+    logger.warn({ err: err.message }, 'daily admin digest failed');
+  }
+}
+
 export function startJobs() {
   cron.schedule('*/5 * * * *',  () => guard('retryUnsyncedSubs', () => retryUnsyncedSubs()).catch((e) => logger.error({ e }, 'retry job')));
   cron.schedule('*/15 * * * *', () => guard('expireDueSubs', () => expireDueSubs()).catch((e) => logger.error({ e }, 'expire job')));
@@ -320,6 +375,8 @@ export function startJobs() {
   cron.schedule('*/10 * * * *', () => guard('refreshLastSeen', () => refreshLastSeen()).catch((e) => logger.error({ e }, 'monitor job')));
   // Once a day — 08:00 local (TZ comes from the container / env).
   cron.schedule('0 8 * * *',    () => guard('sendExpiryReminders', () => sendExpiryReminders()).catch((e) => logger.error({ e }, 'expiry reminder job')));
+  // Once a day — 09:00: admin Telegram digest (optional feature flag).
+  cron.schedule('0 9 * * *',    () => guard('dailyAdminDigest', () => dailyAdminDigest()).catch((e) => logger.error({ e }, 'daily digest')));
   // Overnight: drop snapshots older than the retention window.
   cron.schedule('30 3 * * *',   () => guard('pruneUsageSnapshots', () => pruneUsageSnapshots()));
 
@@ -373,11 +430,18 @@ export function startJobs() {
   cron.schedule('15 4 * * 0',   () => guard('securityPrune', () => security.pruneOld(90))
     .catch((e) => logger.error({ e }, 'security prune')));
 
+  cron.schedule('*/5 * * * *',  () => guard('quotaEnforce', () => quota.enforceQuotas())
+    .catch((e) => logger.error({ e }, 'quota enforce')));
+  cron.schedule('5 0 1 * *',    () => guard('quotaReset', () => quota.resetMonthly())
+    .catch((e) => logger.error({ e }, 'quota reset')));
+  cron.schedule('30 2 * * *',   () => guard('dailyBackup', () => runDailyBackup())
+    .catch((e) => logger.error({ e }, 'daily backup')));
+
   logger.info('cron jobs scheduled');
 }
 
 // Exposed so an admin can trigger a run manually from the UI
 // (e.g. after configuring settings the first time).
-export { sendExpiryReminders };
+export { sendExpiryReminders, dailyAdminDigest };
 
-export default { startJobs, sendExpiryReminders };
+export default { startJobs, sendExpiryReminders, dailyAdminDigest };

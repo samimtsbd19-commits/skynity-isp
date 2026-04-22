@@ -4,6 +4,8 @@ import { AuthProvider, useAuth } from './hooks/useAuth';
 import Layout from './components/Layout';
 import { RouterProvider } from './contexts/RouterContext';
 import Login from './pages/Login';
+import ChangePassword from './pages/ChangePassword';
+import AccessPoints from './pages/AccessPoints';
 import Dashboard from './pages/Dashboard';
 import Orders from './pages/Orders';
 import Customers from './pages/Customers';
@@ -89,6 +91,7 @@ export default function App() {
                 {/* Old /portal path still works when accessed from admin host */}
                 <Route path="/portal/*" element={<PublicPortal />} />
                 <Route path="/login" element={<Login />} />
+                <Route path="/change-password" element={<ChangePassword />} />
                 <Route
                   path="/"
                   element={
@@ -115,6 +118,7 @@ export default function App() {
               <Route path="suspensions" element={<Suspensions />} />
               <Route path="bandwidth" element={<Bandwidth />} />
               <Route path="routers" element={<Routers />} />
+              <Route path="access-points" element={<AccessPoints />} />
               <Route path="configs" element={<Configs />} />
               <Route path="hotspot" element={<Hotspot />} />
               <Route path="hotspot-template" element={<HotspotTemplate />} />

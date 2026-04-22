@@ -44,6 +44,10 @@ import { renderInvoiceForOrder } from '../services/invoice.js';
 import { normaliseMac } from '../utils/mac.js';
 import otp from '../services/otp.js';
 import trial from '../services/trial.js';
+import redis from '../utils/redisClient.js';
+import bkashApi from '../services/bkashApi.js';
+import linePassword from '../services/linePassword.js';
+import { approveOrderAndProvision } from '../services/provisioning.js';
 import bcrypt from 'bcrypt';
 import { signCustomerToken, requireCustomer } from '../middleware/auth.js';
 import { bandwidthDaily, getCustomerShareView } from '../services/bandwidth.js';
@@ -149,13 +153,21 @@ async function paymentInfo() {
   };
 }
 
+/** Manual Send Money is always available when numbers are configured; API checkout is optional. */
+async function paymentModesPublic() {
+  return {
+    manual_send_money: true,
+    bkash_api_checkout: await bkashApi.isCheckoutReady(),
+  };
+}
+
 // ============================================================
 // 1) GET /portal/packages
 // ============================================================
 router.get('/packages', getLimiter, async (_req, res) => {
   try {
     const [
-      pkgs, brandName, logoUrl, primaryColor, pay, flags, androidUrl, iosUrl, content, support,
+      pkgs, brandName, logoUrl, primaryColor, pay, payModes, flags, androidUrl, iosUrl, content, support,
       announcementEnabled, announcement, heroImages, heroRotateMs,
       trialBannerEnabled, trialDays, trialSpeed,
     ] = await Promise.all([
@@ -164,6 +176,7 @@ router.get('/packages', getLimiter, async (_req, res) => {
       settings.getSetting('branding.logo_url'),
       settings.getSetting('branding.primary_color'),
       paymentInfo(),
+      paymentModesPublic(),
       publicFeatureFlags(),
       settings.getSetting('site.app_android_url'),
       settings.getSetting('site.app_ios_url'),
@@ -192,6 +205,7 @@ router.get('/packages', getLimiter, async (_req, res) => {
         primary_color: primaryColor || '#f59e0b',
       },
       payment: { bkash: pay.bkash, nagad: pay.nagad },
+      payment_modes: payModes,
       currency_symbol: pay.currency_symbol,
       support_phone: pay.support_phone,
       flags,
@@ -352,6 +366,7 @@ router.post('/orders', postLimiter, async (req, res) => {
     );
 
     const pay = await paymentInfo();
+    const modes = await paymentModesPublic();
     res.json({
       ok: true,
       order_code: orderCode,
@@ -359,6 +374,7 @@ router.post('/orders', postLimiter, async (req, res) => {
       amount: Number(pkg.price),
       package: { code: pkg.code, name: pkg.name, service_type: pkg.service_type },
       payment: { bkash: pay.bkash, nagad: pay.nagad },
+      payment_modes: modes,
       currency_symbol: pay.currency_symbol,
     });
   } catch (err) {
@@ -420,6 +436,7 @@ router.post('/orders/custom', postLimiter, async (req, res) => {
     );
 
     const pay = await paymentInfo();
+    const modes = await paymentModesPublic();
     res.json({
       ok: true,
       order_code: orderCode,
@@ -427,6 +444,7 @@ router.post('/orders/custom', postLimiter, async (req, res) => {
       amount,
       package: { code, name: `Custom ${spd}M · ${dur}d · ${dev}dev` },
       payment: { bkash: pay.bkash, nagad: pay.nagad },
+      payment_modes: modes,
       currency_symbol: pay.currency_symbol,
       custom: { devices: dev, speed_mbps: spd, duration_days: dur },
     });
@@ -525,7 +543,7 @@ router.get('/orders/:code', getLimiter, async (req, res) => {
       if (sub) subscription = sub;
     }
 
-    res.json({
+    const out = {
       order_code: order.order_code,
       status: order.status,
       amount: Number(order.amount),
@@ -533,7 +551,13 @@ router.get('/orders/:code', getLimiter, async (req, res) => {
       rejected_reason: order.rejected_reason || null,
       created_at: order.created_at,
       subscription,
-    });
+    };
+    if (order.status === 'pending_payment' || order.status === 'payment_submitted') {
+      const pay = await paymentInfo();
+      out.payment = { bkash: pay.bkash, nagad: pay.nagad };
+      out.payment_modes = await paymentModesPublic();
+    }
+    res.json(out);
   } catch (err) {
     logger.error({ err }, 'portal order status failed');
     res.status(500).json({ error: 'internal error' });
@@ -773,6 +797,7 @@ router.post('/renewals', postLimiter, async (req, res) => {
     );
 
     const pay = await paymentInfo();
+    const modes = await paymentModesPublic();
     res.json({
       ok: true,
       order_code: newCode,
@@ -781,6 +806,7 @@ router.post('/renewals', postLimiter, async (req, res) => {
       package: { code: pkg.code, name: pkg.name, service_type: pkg.service_type },
       renewal_of: { id: sub.id, login_username: sub.login_username, current_expires_at: sub.expires_at },
       payment: { bkash: pay.bkash, nagad: pay.nagad },
+      payment_modes: modes,
       currency_symbol: pay.currency_symbol,
     });
   } catch (err) {
@@ -839,6 +865,163 @@ router.post('/otp/request', otpLimiter, async (req, res) => {
 //     — exactly the same payload shape as /customer/login, so
 //     the frontend can treat either auth path the same way.
 // ============================================================
+// ============================================================
+// bKash Tokenized Checkout (feature.bkash_api + merchant creds)
+// ============================================================
+router.post('/bkash/create', postLimiter, async (req, res) => {
+  try {
+    if (!(await bkashApi.isApiEnabled())) {
+      return res.status(404).json({ error: 'bKash API checkout is not enabled' });
+    }
+    const code = String(req.body?.order_code || '').toUpperCase().trim();
+    if (!code) return res.status(400).json({ error: 'order_code required' });
+    const order = await db.queryOne(
+      `SELECT o.*, p.name AS package_name FROM orders o
+        JOIN packages p ON p.id = o.package_id WHERE o.order_code = ?`,
+      [code]
+    );
+    if (!order) return res.status(404).json({ error: 'order not found' });
+    if (order.status !== 'pending_payment') {
+      return res.status(400).json({ error: 'order is not awaiting payment' });
+    }
+    const cbBase = String(config.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+    if (!cbBase) return res.status(500).json({ error: 'PUBLIC_BASE_URL is not configured' });
+    const callbackURL = `${cbBase}/api/portal/bkash/callback`;
+    const { paymentID, bkashURL } = await bkashApi.createPayment({
+      amount: order.amount,
+      merchantInvoiceNumber: order.order_code,
+      payerReference: order.phone,
+      callbackURL,
+    });
+    await redis.setex(`bkash:pay:${paymentID}`, 86400, String(order.id));
+    res.json({ ok: true, bkashURL, paymentID });
+  } catch (err) {
+    logger.error({ err }, 'bKash create failed');
+    res.status(500).json({ error: err.message || 'bKash error' });
+  }
+});
+
+async function handleBkashCallback(req, res) {
+  const paymentID = req.query.paymentID || req.query.paymentid || req.body?.paymentID;
+  const status = String(req.query.status || req.body?.status || '').toLowerCase();
+  const base = String(config.PUBLIC_BASE_URL || '').replace(/\/$/, '') || '';
+  const redir = (params) => res.redirect(302, `${base}/portal?${new URLSearchParams(params)}`);
+
+  if (!paymentID) return redir({ bkash: 'err', reason: 'missing_payment_id' });
+  const orderIdStr = await redis.get(`bkash:pay:${paymentID}`);
+  if (!orderIdStr) return redir({ bkash: 'err', reason: 'session_expired' });
+
+  if (status && status !== 'success') {
+    return redir({ bkash: 'cancel', status });
+  }
+
+  try {
+    const orderId = Number(orderIdStr);
+    const order = await db.queryOne('SELECT * FROM orders WHERE id = ?', [orderId]);
+    if (!order) return redir({ bkash: 'err', reason: 'order_gone' });
+    if (order.status === 'approved') {
+      await redis.del(`bkash:pay:${paymentID}`);
+      return redir({ bkash: 'ok', order: order.order_code });
+    }
+
+    const exec = await bkashApi.executePayment(paymentID);
+    const trxOk = exec?.transactionStatus === 'Completed' || exec?.statusCode === '0000';
+    if (!trxOk) {
+      logger.warn({ exec, paymentID }, 'bKash execute not completed');
+      return redir({ bkash: 'err', reason: 'not_completed' });
+    }
+
+    const adm = await db.queryOne(
+      `SELECT id, role FROM admins WHERE role = 'superadmin' AND is_active = 1 ORDER BY id ASC LIMIT 1`
+    );
+    const trxId = String(exec?.trxID || exec?.trxId || paymentID).slice(0, 50);
+    await db.query(
+      `INSERT INTO payments (order_id, method, sender_number, trx_id, amount, screenshot_path, status, verified_by, verified_at)
+       VALUES (?, 'bkash', ?, ?, ?, NULL, 'verified', ?, NOW())`,
+      [order.id, exec?.customerMsisdn || order.phone || null, trxId, order.amount, adm?.id || null]
+    );
+
+    await approveOrderAndProvision({ orderId: order.id, admin: adm || { id: null, role: 'superadmin' } });
+    await redis.del(`bkash:pay:${paymentID}`);
+    notifyAdmins(
+      `bKash payment completed\nOrder: \`${order.order_code}\`\nTrx: \`${trxId}\`\nAmount: ${order.amount}`
+    ).catch(() => {});
+    return redir({ bkash: 'ok', order: order.order_code });
+  } catch (err) {
+    logger.error({ err, paymentID }, 'bKash callback failed');
+    return redir({ bkash: 'err', reason: String(err.message || 'failed').slice(0, 80) });
+  }
+}
+
+router.get('/bkash/callback', handleBkashCallback);
+router.post('/bkash/callback', handleBkashCallback);
+
+// ============================================================
+// Customer line password reset (OTP via notify.otp)
+// POST /portal/account/reset-password/request  { phone }
+// POST /portal/account/reset-password          { phone, code, new_password }
+// ============================================================
+router.post('/account/reset-password/request', otpLimiter, async (req, res) => {
+  try {
+    const phone = normalisePhone(req.body?.phone);
+    if (!phone) return res.status(400).json({ error: 'phone required' });
+    const out = await otp.issueOtp({ phone, purpose: 'password_reset', ip: clientIp(req) });
+    if (!out.ok) return res.status(400).json(out);
+    res.json(out);
+  } catch (err) {
+    logger.error({ err }, 'reset-password request failed');
+    res.status(500).json({ error: err.message || 'internal error' });
+  }
+});
+
+router.post('/account/reset-password', postLimiter, async (req, res) => {
+  try {
+    const phone = normalisePhone(req.body?.phone);
+    const code = String(req.body?.code || '').trim();
+    const newPassword = String(req.body?.new_password || '');
+    if (!phone || !code) return res.status(400).json({ error: 'phone and code required' });
+    if (newPassword.length < 8) return res.status(400).json({ error: 'new_password must be at least 8 characters' });
+
+    const out = await otp.verifyOtp({ phone, code, purpose: 'password_reset' });
+    if (!out.ok) return res.status(400).json(out);
+    if (!out.customer) {
+      return res.status(400).json({ ok: false, error: 'no service found for this phone' });
+    }
+
+    const subs = await db.query(
+      `SELECT s.* FROM subscriptions s
+        WHERE s.customer_id = ? AND s.status = 'active'`,
+      [out.customer.id]
+    );
+    if (!subs.length) {
+      return res.status(400).json({ error: 'no active subscriptions for this phone' });
+    }
+
+    for (const s of subs) {
+      const pkg = await db.queryOne('SELECT * FROM packages WHERE id = ?', [s.package_id]);
+      await db.query('UPDATE subscriptions SET login_password = ? WHERE id = ?', [newPassword, s.id]);
+      const fresh = await db.queryOne('SELECT * FROM subscriptions WHERE id = ?', [s.id]);
+      try {
+        await linePassword.pushSubscriptionPasswordToNetwork(fresh, newPassword, pkg);
+      } catch (err) {
+        logger.warn({ err: err.message, subId: s.id }, 'portal password reset: router push failed');
+        await db.query('UPDATE subscriptions SET mt_synced = 0, mt_error = ? WHERE id = ?', [err.message, s.id]);
+      }
+    }
+
+    await db.query(
+      `INSERT INTO activity_log (actor_type, actor_id, action, entity_type, entity_id, meta, ip_address)
+       VALUES ('customer', ?, 'portal_password_reset', 'customer', ?, NULL, ?)`,
+      [phone, String(out.customer.id), clientIp(req)]
+    );
+
+    res.json({ ok: true, updated: subs.length });
+  } catch (err) {
+    logger.error({ err }, 'reset-password failed');
+    res.status(500).json({ error: err.message || 'internal error' });
+  }
+});
+
 router.post('/otp/verify', postLimiter, async (req, res) => {
   try {
     const phone = normalisePhone(req.body?.phone);

@@ -26,14 +26,19 @@ export function AuthProvider({ children }) {
       });
   }, []);
 
+  const setSession = (token, adminUser) => {
+    localStorage.setItem('skynity_token', token);
+    localStorage.setItem('skynity_admin', JSON.stringify(adminUser));
+    setAdmin(adminUser);
+  };
+
   const login = async (u, p) => {
     setLoading(true);
     try {
-      const { token, admin } = await apiLogin(u, p);
-      localStorage.setItem('skynity_token', token);
-      localStorage.setItem('skynity_admin', JSON.stringify(admin));
-      setAdmin(admin);
-      return admin;
+      const data = await apiLogin(u, p);
+      if (data.needs_2fa) return { needs2fa: true, sessionId: data.session_id };
+      setSession(data.token, data.admin);
+      return { needs2fa: false, admin: data.admin };
     } finally { setLoading(false); }
   };
 
@@ -45,7 +50,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthCtx.Provider value={{ admin, login, logout, loading }}>
+    <AuthCtx.Provider value={{ admin, login, logout, loading, setSession }}>
       {children}
     </AuthCtx.Provider>
   );

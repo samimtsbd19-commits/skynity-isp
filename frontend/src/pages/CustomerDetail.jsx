@@ -8,7 +8,7 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import {
   apiCustomer, apiNotifyChannels, apiNotifySendCredentials,
-  apiSubscriptionBandwidth, apiExtendSubscription,
+  apiSubscriptionBandwidth, apiSubscriptionQuota, apiExtendSubscription,
   apiSuspensionsByCustomer, apiSuspensionApply, apiSuspensionLift,
   apiStaticIpAssign, apiStaticIpClear,
   apiTunnels, apiAssignSubTunnel, apiClearSubTunnel,
@@ -160,6 +160,11 @@ function SubscriptionCard({ sub }) {
   const daysLeft = Math.ceil((expires - new Date()) / 86400000);
   const [showChart, setShowChart] = useState(false);
   const [showExtend, setShowExtend] = useState(false);
+  const quotaQ = useQuery({
+    queryKey: ['sub-quota', sub.id],
+    queryFn: () => apiSubscriptionQuota(sub.id),
+  });
+  const qd = quotaQ.data;
 
   return (
     <>
@@ -196,6 +201,21 @@ function SubscriptionCard({ sub }) {
           {expired ? 'Expired' : `${daysLeft} days left`}
         </div>
         <div className="mt-3 flex justify-end gap-2 flex-wrap">
+          {qd?.limit_gb != null && (
+            <div className="w-full text-left mb-1">
+              <div className="text-mono text-[10px] text-text-mute uppercase">Monthly quota</div>
+              <div className="h-2 bg-border-dim rounded mt-1 overflow-hidden">
+                <div
+                  className={`h-full rounded ${qd.throttled ? 'bg-amber' : 'bg-cyan'}`}
+                  style={{ width: `${Math.min(100, qd.percent || 0)}%` }}
+                />
+              </div>
+              <div className="text-[11px] font-mono text-text-dim mt-0.5">
+                {qd.used_gb?.toFixed?.(2) ?? qd.used_gb} / {qd.limit_gb} GB
+                {qd.throttled ? ' · throttled' : ''}
+              </div>
+            </div>
+          )}
           <button
             onClick={() => setShowChart((v) => !v)}
             className="btn btn-ghost text-xs"

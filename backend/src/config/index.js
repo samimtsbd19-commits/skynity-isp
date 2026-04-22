@@ -5,7 +5,7 @@ import { z } from 'zod';
 const emptyToUndef = (v) => (v === '' ? undefined : v);
 
 const ConfigSchema = z.object({
-  NODE_ENV: z.enum(['development', 'production']).default('production'),
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('production'),
   PORT: z.coerce.number().default(3000),
   LOG_LEVEL: z.string().default('info'),
 
@@ -47,6 +47,14 @@ const ConfigSchema = z.object({
   BKASH_TYPE: z.string().default('personal'),
   NAGAD_NUMBER: z.string().default(''),
   NAGAD_TYPE: z.string().default('personal'),
+
+  BKASH_APP_KEY: z.preprocess(emptyToUndef, z.string().optional()),
+  BKASH_APP_SECRET: z.preprocess(emptyToUndef, z.string().optional()),
+  BKASH_USERNAME: z.preprocess(emptyToUndef, z.string().optional()),
+  BKASH_PASSWORD: z.preprocess(emptyToUndef, z.string().optional()),
+  BKASH_BASE_URL: z.string().default('https://tokenized.sandbox.bka.sh/v1.2.0-beta'),
+  BKASH_MODE: z.enum(['sandbox', 'live']).default('sandbox'),
+  BKASH_AGREEMENT_ID: z.preprocess(emptyToUndef, z.string().optional()),
 
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
   SESSION_SECRET: z.string().min(16, 'SESSION_SECRET must be at least 16 characters'),

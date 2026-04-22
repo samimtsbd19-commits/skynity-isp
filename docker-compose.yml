@@ -159,6 +159,9 @@ services:
       RADIUS_ACCT_PORT: ${RADIUS_ACCT_PORT:-1813}
       RADIUS_COA_PORT: ${RADIUS_COA_PORT:-3799}
       RADIUS_LOCALHOST_SECRET: ${RADIUS_LOCALHOST_SECRET:-}
+
+      BACKUP_DIR: ${BACKUP_DIR:-/var/backups/skynity}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
     depends_on:
       mysql:
         condition: service_healthy
@@ -169,6 +172,7 @@ services:
     volumes:
       - uploads:/app/uploads
       - ./docs:/app/docs
+      - ./backups:/var/backups/skynity
     expose:
       - "3000"
     healthcheck:

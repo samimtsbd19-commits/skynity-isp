@@ -18,11 +18,21 @@ export async function requireAdmin(req, res, next) {
 
     const payload = jwt.verify(token, config.JWT_SECRET);
     const admin = await db.queryOne(
-      'SELECT id, username, full_name, role, is_active FROM admins WHERE id = ?',
+      `SELECT id, username, full_name, role, is_active,
+              must_change_password, totp_enabled
+         FROM admins WHERE id = ?`,
       [payload.id]
     );
     if (!admin || !admin.is_active) return res.status(401).json({ error: 'invalid admin' });
     req.admin = admin;
+
+    if (admin.must_change_password && req.path !== '/auth/change-password') {
+      return res.status(428).json({
+        error: 'password change required',
+        code: 'PASSWORD_CHANGE_REQUIRED',
+      });
+    }
+
     next();
   } catch (err) {
     res.status(401).json({ error: 'invalid token' });
@@ -35,6 +45,15 @@ export function requireRole(...roles) {
     if (!roles.includes(req.admin.role)) return res.status(403).json({ error: 'forbidden' });
     next();
   };
+}
+
+/** Row-level scope for reseller admins (customers / orders / subscriptions). */
+export function resellerScope(req, alias = '') {
+  if (req.admin?.role === 'reseller') {
+    const col = alias ? `${alias}.reseller_id` : 'reseller_id';
+    return { sql: ` AND ${col} = ? `, params: [req.admin.id] };
+  }
+  return { sql: '', params: [] };
 }
 
 // ============================================================
@@ -80,7 +99,9 @@ export async function getAdminFromToken(token) {
   try {
     const payload = jwt.verify(token, config.JWT_SECRET);
     const admin = await db.queryOne(
-      'SELECT id, username, full_name, role, is_active FROM admins WHERE id = ?',
+      `SELECT id, username, full_name, role, is_active,
+              must_change_password, totp_enabled
+         FROM admins WHERE id = ?`,
       [payload.id]
     );
     if (!admin || !admin.is_active) return null;

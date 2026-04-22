@@ -56,7 +56,23 @@ import crypto from 'node:crypto';
 import db from '../database/pool.js';
 import config from '../config/index.js';
 import logger from '../utils/logger.js';
+import { decrypt } from '../utils/crypto.js';
 import { getSetting } from './settings.js';
+
+/** Plain shared secret for NAS / CoA (decrypt DB ciphertext if present). */
+export function getRadiusSecretForRouter(router) {
+  if (!router) return '';
+  if (router.radius_secret_enc) {
+    try { return decrypt(router.radius_secret_enc); } catch { return ''; }
+  }
+  if (router.radius_secret_plain != null && router.radius_secret_plain !== '') {
+    return String(router.radius_secret_plain);
+  }
+  if (router.radius_secret != null && router.radius_secret !== '') {
+    return String(router.radius_secret);
+  }
+  return '';
+}
 
 // ------------------------------------------------------------
 // Feature gate
@@ -359,7 +375,7 @@ export async function upsertNas(router) {
   if (!router) return { skipped: true };
   const nasname = router.radius_nas_ip || router.host;
   const shortname = router.radius_nas_shortname || router.name || `router-${router.id}`;
-  const secret = router.radius_secret || (await getSetting('radius.default_secret')) || '';
+  const secret = getRadiusSecretForRouter(router) || (await getSetting('radius.default_secret')) || '';
   const type = (await getSetting('radius.nas_type')) || 'mikrotik';
 
   if (!nasname) {
@@ -536,12 +552,13 @@ export async function drainDisconnectQueue({ batchSize = 20 } = {}) {
       }
       if (!router) throw new Error('no target router for CoA');
       if (!router.radius_nas_ip) throw new Error('router has no radius_nas_ip');
-      if (!router.radius_secret) throw new Error('router has no radius_secret');
+      const coaSecret = getRadiusSecretForRouter(router);
+      if (!coaSecret) throw new Error('router has no radius_secret');
 
       const result = await sendDisconnect({
         username: job.username,
         nasIp: router.radius_nas_ip,
-        secret: router.radius_secret,
+        secret: coaSecret,
         port: router.radius_coa_port || 3799,
       });
       if (!result.ok) throw new Error(`NAS returned NAK code=${result.code}`);
@@ -605,8 +622,6 @@ export async function fullSyncAll({ forceEnable = false } = {}) {
     catch (err) { report.errors.push({ kind: 'group', id: p.id, error: err.message }); }
   }
   for (const r of routers) {
-    // Hydrate shared secret — may be stored encrypted elsewhere,
-    // here we only use the plaintext column `radius_secret`.
     try { await upsertNas(r); report.routers++; }
     catch (err) { report.errors.push({ kind: 'nas', id: r.id, error: err.message }); }
   }
@@ -700,6 +715,7 @@ void config;
 
 export default {
   isEnabled,
+  getRadiusSecretForRouter,
   upsertUser, disableUser, enableUser, deleteUser,
   upsertGroup, deleteGroup,
   upsertNas, deleteNas,

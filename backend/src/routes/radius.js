@@ -23,6 +23,7 @@
 import { Router } from 'express';
 import db from '../database/pool.js';
 import { requireAdmin, requireRole } from '../middleware/auth.js';
+import { encrypt } from '../utils/crypto.js';
 import radius from '../services/radius.js';
 import { getSetting, setSetting } from '../services/settings.js';
 
@@ -157,7 +158,10 @@ router.post('/nas', requireAdmin, requireRole('superadmin', 'admin'), async (req
     // Let caller override the fields stored on the router row.
     const updates = [];
     if (b.radius_nas_ip !== undefined)        updates.push(['radius_nas_ip', b.radius_nas_ip]);
-    if (b.radius_secret !== undefined)        updates.push(['radius_secret', b.radius_secret]);
+    if (b.radius_secret !== undefined) {
+      updates.push(['radius_secret_enc', b.radius_secret ? encrypt(b.radius_secret) : null]);
+      updates.push(['radius_secret_plain', null]);
+    }
     if (b.radius_nas_shortname !== undefined) updates.push(['radius_nas_shortname', b.radius_nas_shortname]);
     if (b.radius_coa_port !== undefined)      updates.push(['radius_coa_port', Number(b.radius_coa_port) || 3799]);
     if (b.radius_enabled !== undefined)       updates.push(['radius_enabled', b.radius_enabled ? 1 : 0]);
@@ -225,13 +229,14 @@ router.post('/disconnect', requireAdmin, requireRole('superadmin', 'admin'), asy
         ? await db.queryOne('SELECT * FROM mikrotik_routers WHERE id = ?', [routerId])
         : await db.queryOne('SELECT * FROM mikrotik_routers WHERE is_default = 1 AND is_active = 1 LIMIT 1');
       if (!r) return res.status(400).json({ error: 'no target router' });
-      if (!r.radius_nas_ip || !r.radius_secret) {
+      const sec = radius.getRadiusSecretForRouter(r);
+      if (!r.radius_nas_ip || !sec) {
         return res.status(400).json({ error: 'router missing radius_nas_ip or radius_secret' });
       }
       const out = await radius.sendDisconnect({
         username: b.username,
         nasIp: r.radius_nas_ip,
-        secret: r.radius_secret,
+        secret: sec,
         port: r.radius_coa_port || 3799,
       });
       res.json(out);

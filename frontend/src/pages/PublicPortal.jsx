@@ -277,6 +277,7 @@ function useActiveOffers() {
 // ===================================================================
 function Landing() {
   const nav = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const info = useBranding();
   const offers = useActiveOffers();
   const t = useT();
@@ -291,12 +292,68 @@ function Landing() {
   const support = info.support || {};
   const color = info.branding?.primary_color || '#f59e0b';
 
+  const bkashState = searchParams.get('bkash');
+  const bkashOrder = searchParams.get('order');
+  const bkashReason = searchParams.get('reason');
+  const dismissBkashBanner = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('bkash');
+    next.delete('order');
+    next.delete('status');
+    next.delete('reason');
+    setSearchParams(next, { replace: true });
+  };
+
   // Packages that are featured by any active offer — we highlight
   // their card and show a small "offer" ribbon.
   const featuredCodes = new Set(offers.map((o) => o.package_code).filter(Boolean));
 
   return (
     <Layout branding={info.branding} support={support}>
+      {bkashState && (
+        <div
+          className="card"
+          style={{
+            marginBottom: 16,
+            borderColor: bkashState === 'ok' ? '#22c55e55' : bkashState === 'cancel' ? '#eab30855' : '#ef444455',
+            background: bkashState === 'ok' ? '#14532d18' : '#451a1a22',
+          }}
+        >
+          {bkashState === 'ok' && (
+            <>
+              <div className="kicker" style={{ color: '#86efac' }}>bKash payment</div>
+              <div style={{ fontWeight: 600, marginTop: 6 }}>
+                Payment received{bkashOrder ? ` for order ${bkashOrder}` : ''}. Your subscription is being activated.
+              </div>
+              {bkashOrder && (
+                <div style={{ marginTop: 10 }}>
+                  <Link to={`/portal/status/${encodeURIComponent(bkashOrder)}`} className="btn" style={{ background: color }}>
+                    View order status
+                  </Link>
+                </div>
+              )}
+            </>
+          )}
+          {bkashState === 'cancel' && (
+            <div>
+              <div className="kicker" style={{ color: '#fbbf24' }}>bKash</div>
+              <div style={{ marginTop: 6 }}>Payment was cancelled. You can try again from your order page.</div>
+            </div>
+          )}
+          {(bkashState === 'err' || (bkashState && bkashState !== 'ok' && bkashState !== 'cancel')) && (
+            <div>
+              <div className="kicker" style={{ color: '#fca5a5' }}>bKash</div>
+              <div style={{ marginTop: 6 }}>
+                Something went wrong with the payment
+                {bkashReason ? `: ${bkashReason}` : ''}. If money left your wallet, contact support with your TrxID.
+              </div>
+            </div>
+          )}
+          <button type="button" onClick={dismissBkashBanner} className="btn btn-ghost" style={{ marginTop: 12 }}>
+            Dismiss
+          </button>
+        </div>
+      )}
       {/* About us — admin-editable intro */}
       {(content.intro_title || content.intro_html) && (
         <div className="card" style={{
@@ -850,6 +907,7 @@ function PaymentStep({ order, branding, sym, onSubmitted }) {
   const [sender, setSender] = useState('');
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [apiBusy, setApiBusy] = useState(false);
   const [err, setErr] = useState('');
 
   const color = branding?.primary_color || '#f59e0b';
@@ -857,6 +915,21 @@ function PaymentStep({ order, branding, sym, onSubmitted }) {
   const nagad = order.payment?.nagad || {};
   const chosenNumber = method === 'bkash' ? bkash.number : method === 'nagad' ? nagad.number : '';
   const chosenType   = method === 'bkash' ? bkash.type   : method === 'nagad' ? nagad.type   : '';
+  const bkashApiCheckout = !!order.payment_modes?.bkash_api_checkout;
+
+  const startBkashCheckout = async () => {
+    setErr('');
+    setApiBusy(true);
+    try {
+      const { data } = await api.post('/bkash/create', { order_code: order.order_code });
+      if (data?.bkashURL) window.location.href = data.bkashURL;
+      else setErr(data?.error || 'Could not start bKash checkout');
+    } catch (ex) {
+      setErr(ex?.response?.data?.error || ex.message);
+    } finally {
+      setApiBusy(false);
+    }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -890,6 +963,32 @@ function PaymentStep({ order, branding, sym, onSubmitted }) {
             <div className="muted">Send Money to ({chosenType || 'personal'})</div>
             <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '.02em' }}>{chosenNumber}</div>
             <div className="muted" style={{ marginTop: 4 }}>Reference: <code>{order.order_code}</code></div>
+            {method === 'bkash' && bkashApiCheckout && (
+              <div style={{ marginTop: 14 }}>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={apiBusy}
+                  onClick={startBkashCheckout}
+                  style={{
+                    width: '100%',
+                    background: '#e2136e',
+                    boxShadow: '0 4px 14px rgba(226,19,110,0.35)',
+                  }}
+                >
+                  {apiBusy ? 'Opening bKash…' : 'Pay with bKash (in app)'}
+                </button>
+                <div className="muted" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.45 }}>
+                  Or send money manually to the number above and enter your Trx ID below.
+                </div>
+              </div>
+            )}
+            {method === 'bkash' && !bkashApiCheckout && (
+              <div className="muted" style={{ marginTop: 10, fontSize: 12, lineHeight: 1.45 }}>
+                Personal bKash: use <strong>Send Money</strong> to this number, then paste the Trx ID below.
+                Auto checkout can be added later (merchant API) in admin settings.
+              </div>
+            )}
           </div>
         ) : method !== 'other' ? (
           <div className="muted" style={{ marginTop: 8 }}>No {method} number configured yet — please use a different method or contact support.</div>
@@ -1410,6 +1509,197 @@ function CustomerLogin() {
 
         <div style={{ marginTop: 16 }}>
           <Link to="/portal" className="btn btn-ghost">← Back to packages</Link>
+        </div>
+        <div style={{ marginTop: 14, textAlign: 'center' }}>
+          <Link to="/portal/reset-password" style={{ fontSize: 13, color }}>
+            Forgot your WiFi line password?
+          </Link>
+        </div>
+      </div>
+    </Layout>
+  );
+}
+
+// ===================================================================
+// Page: Reset PPPoE / Hotspot line password — /portal/reset-password
+// OTP via same channels as login (Telegram / SMS when configured).
+// ===================================================================
+function PortalPasswordReset() {
+  const info = useBranding();
+  const color = info?.branding?.primary_color || '#f59e0b';
+  const [step, setStep] = useState(1);
+  const [phone, setPhone] = useState('');
+  const [code, setCode] = useState('');
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [sent, setSent] = useState(null);
+  const [done, setDone] = useState(false);
+  const [updated, setUpdated] = useState(0);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  if (!info) return <Layout><div className="muted" style={{ textAlign: 'center' }}>Loading…</div></Layout>;
+
+  const requestOtp = async (e) => {
+    e?.preventDefault();
+    setErr('');
+    setBusy(true);
+    try {
+      const { data } = await api.post('/account/reset-password/request', { phone: phone.trim() });
+      if (!data.ok) {
+        setErr(data.error || 'Could not send code');
+        return;
+      }
+      setSent(data);
+      setStep(2);
+    } catch (ex) {
+      setErr(ex?.response?.data?.error || ex.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErr('');
+    if (pw.length < 8) {
+      setErr('Password must be at least 8 characters');
+      return;
+    }
+    if (pw !== pw2) {
+      setErr('Passwords do not match');
+      return;
+    }
+    setBusy(true);
+    try {
+      const { data } = await api.post('/account/reset-password', {
+        phone: phone.trim(),
+        code: code.trim(),
+        new_password: pw,
+      });
+      if (!data.ok) {
+        setErr(data.error || 'Reset failed');
+        return;
+      }
+      setUpdated(data.updated || 0);
+      setDone(true);
+    } catch (ex) {
+      setErr(ex?.response?.data?.error || ex.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (done) {
+    return (
+      <Layout branding={info.branding}>
+        <div className="card">
+          <div className="kicker" style={{ color: '#86efac' }}>Password updated</div>
+          <h2 style={{ margin: '4px 0 12px' }}>You are all set</h2>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Your WiFi login password was updated for {updated} active line{updated === 1 ? '' : 's'}.
+            Reconnect to WiFi with the new password (or wait a moment and try again).
+          </p>
+          <Link to="/portal/login" className="btn" style={{ marginTop: 12, background: color }}>
+            Log in to my account
+          </Link>
+          <div style={{ marginTop: 12 }}>
+            <Link to="/portal" className="btn btn-ghost">← Home</Link>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
+  return (
+    <Layout branding={info.branding}>
+      <div className="card">
+        <div className="kicker">Self-service</div>
+        <h2 style={{ margin: '4px 0 8px' }}>Reset WiFi password</h2>
+        <p className="muted" style={{ marginTop: 0, marginBottom: 16 }}>
+          For the username/password you use on the hotspot or PPPoE login page — not the admin panel.
+          We will send a one-time code to your phone (same as customer login).
+        </p>
+
+        {step === 1 && (
+          <form onSubmit={requestOtp}>
+            <div style={{ marginBottom: 12 }}>
+              <label className="label">Mobile number</label>
+              <input
+                required
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="01XXXXXXXXX"
+                inputMode="tel"
+                autoFocus
+              />
+            </div>
+            {err && <div className="err">{err}</div>}
+            <button type="submit" className="btn" disabled={busy || !phone.trim()} style={{ marginTop: 8 }}>
+              {busy ? 'Sending…' : 'Send verification code'}
+            </button>
+          </form>
+        )}
+
+        {step === 2 && (
+          <form onSubmit={submit}>
+            {sent && (
+              <div className="muted" style={{ marginBottom: 12 }}>
+                Code sent via <b>{sent.channel}</b> to <code>{phone.trim()}</code>.
+                {sent.ttl_seconds ? ` Valid about ${Math.round(sent.ttl_seconds / 60)} min.` : ''}
+              </div>
+            )}
+            <div style={{ marginBottom: 12 }}>
+              <label className="label">Verification code</label>
+              <input
+                required
+                inputMode="numeric"
+                pattern="\d{4,8}"
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                placeholder="123456"
+                style={{ fontFamily: 'ui-monospace, Menlo, monospace', letterSpacing: '3px', fontSize: 18 }}
+              />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label className="label">New password (min 8 characters)</label>
+              <input
+                required
+                type="password"
+                autoComplete="new-password"
+                value={pw}
+                onChange={(e) => setPw(e.target.value)}
+                minLength={8}
+              />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label className="label">Confirm new password</label>
+              <input
+                required
+                type="password"
+                autoComplete="new-password"
+                value={pw2}
+                onChange={(e) => setPw2(e.target.value)}
+                minLength={8}
+              />
+            </div>
+            {err && <div className="err">{err}</div>}
+            <button type="submit" className="btn" disabled={busy} style={{ marginTop: 8 }}>
+              {busy ? 'Saving…' : 'Update password'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ marginLeft: 8 }}
+              onClick={() => { setStep(1); setSent(null); setCode(''); setPw(''); setPw2(''); setErr(''); }}
+            >
+              ← Different number
+            </button>
+          </form>
+        )}
+
+        <div style={{ marginTop: 16 }}>
+          <Link to="/portal/login" className="btn btn-ghost">← Customer login</Link>
         </div>
       </div>
     </Layout>
@@ -2267,6 +2557,7 @@ export default function PublicPortal() {
       <Route path="/trial" element={<TrialClaim />} />
       <Route path="/help" element={<Help />} />
       <Route path="/login" element={<CustomerLogin />} />
+      <Route path="/reset-password" element={<PortalPasswordReset />} />
       <Route path="/account" element={<AccountShell />} />
       <Route path="/status" element={<StatusLookup />} />
       <Route path="/status/:code" element={<StatusLookup />} />
@@ -2449,7 +2740,6 @@ function TrialSpotlight({ days, speed, color, onClaim }) {
 // ═════════════════════════════════════════════════════════════
 function CustomBuilder() {
   const info = useBranding();
-  const nav  = useNavigate();
   const [step, setStep] = useState(1);
   const [devices, setDevices]   = useState(null);
   const [speedMbps, setSpeed]   = useState(null);
@@ -2459,7 +2749,9 @@ function CustomBuilder() {
   const [address, setAddress]   = useState('');
   const [submitting, setSubmit] = useState(false);
   const [err, setErr]           = useState('');
-  const [created, setCreated]   = useState(null);
+  /** After POST /orders/custom: steps 5 = pay, 6 = wait, 7 = creds (same as preset package flow). */
+  const [order, setOrder]       = useState(null);
+  const [mainStep, setMainStep] = useState(1);
 
   const sym   = info?.currency_symbol || '৳';
   const color = info?.branding?.primary_color || '#f59e0b';
@@ -2503,7 +2795,8 @@ function CustomBuilder() {
         devices, speed_mbps: speedMbps, duration_days: days, price,
         full_name: fullName.trim(), phone: phone.trim(), address: address.trim(),
       });
-      setCreated(res.data);
+      setOrder(res.data);
+      setMainStep(5);
     } catch (e) {
       setErr(e?.response?.data?.error || e.message || 'Failed');
     } finally {
@@ -2513,26 +2806,58 @@ function CustomBuilder() {
 
   if (!info) return <Layout><div className="muted" style={{ textAlign: 'center' }}>Loading…</div></Layout>;
 
-  if (created) {
+  if (mainStep >= 5 && order) {
+    const paySym = order.currency_symbol || sym;
+    const custom = order.custom || {};
+    const summaryBits = [custom.devices && `${custom.devices} device${Number(custom.devices) > 1 ? 's' : ''}`,
+      custom.speed_mbps && `${custom.speed_mbps} Mbps`,
+      custom.duration_days && `${custom.duration_days} day${Number(custom.duration_days) > 1 ? 's' : ''}`].filter(Boolean);
     return (
       <Layout branding={info.branding} support={info.support}>
-        <div className="card" style={{ textAlign: 'center', padding: 32, borderColor: `${color}55` }}>
-          <div style={{
-            width: 64, height: 64, borderRadius: '50%', background: `${color}22`,
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 32, marginBottom: 18,
-          }}>✓</div>
-          <h2 className="display" style={{ margin: '0 0 8px', fontSize: 30 }}>Order placed</h2>
-          <div style={{ fontSize: 14, color: '#94a3b8', marginBottom: 20 }}>
-            Your order code:{' '}
-            <strong style={{ color, fontFamily: 'monospace', fontSize: 18 }}>
-              {created.order_code}
-            </strong>
+        <div style={{ marginBottom: 14 }}>
+          <Link to="/portal" style={{ fontSize: 13, color: '#94a3b8' }}>&larr; Home</Link>
+        </div>
+        <div className="card">
+          <div className="kicker" style={{ color }}>Custom plan</div>
+          <div style={{ fontSize: 15, fontWeight: 600, marginTop: 4 }}>
+            Order <code style={{ color }}>{order.order_code}</code>
+            {summaryBits.length > 0 && (
+              <span className="muted" style={{ fontWeight: 400 }}> · {summaryBits.join(' · ')}</span>
+            )}
           </div>
-          <div className="muted" style={{ marginBottom: 24, fontSize: 13 }}>
-            Please complete payment. You'll get a Telegram / SMS confirmation once approved.
+          <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>
+            {paySym}{Number(order.amount).toFixed(0)} — pay below, then wait for verification.
           </div>
-          <Link to="/portal" className="btn btn-ghost">&larr; Back to home</Link>
+
+          <div className="step-dots" style={{ marginTop: 20 }}>
+            <span className={mainStep >= 5 ? 'on' : ''} />
+            <span className={mainStep >= 6 ? 'on' : ''} />
+            <span className={mainStep >= 7 ? 'on' : ''} />
+          </div>
+          <div style={{ textAlign: 'center', fontSize: 12, color: '#78787e', marginTop: 8, marginBottom: 8 }}>
+            {mainStep === 5 && 'Payment'}
+            {mainStep === 6 && 'Verification'}
+            {mainStep === 7 && 'Your login'}
+          </div>
+
+          {mainStep === 5 && (
+            <PaymentStep
+              order={order}
+              branding={info.branding}
+              sym={paySym}
+              onSubmitted={() => setMainStep(6)}
+            />
+          )}
+          {mainStep === 6 && (
+            <WaitStep
+              orderCode={order.order_code}
+              onApproved={() => setMainStep(7)}
+              onDone={setOrder}
+            />
+          )}
+          {mainStep === 7 && order?.subscription && (
+            <CredsStep order={order} />
+          )}
         </div>
       </Layout>
     );

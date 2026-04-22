@@ -12,10 +12,16 @@ api.interceptors.request.use((cfg) => {
   return cfg;
 });
 
-// kick to login on 401
+// kick to login on 401; forced password change on 428
 api.interceptors.response.use(
   (r) => r,
   (err) => {
+    if (err.response?.status === 428 && err.response?.data?.code === 'PASSWORD_CHANGE_REQUIRED') {
+      if (!window.location.pathname.endsWith('/change-password')) {
+        window.location.href = '/change-password';
+      }
+      return Promise.reject(err);
+    }
     if (err.response?.status === 401 && !window.location.pathname.endsWith('/login')) {
       localStorage.removeItem('skynity_token');
       localStorage.removeItem('skynity_admin');
@@ -36,7 +42,14 @@ function routerParams(routerId) {
 export const apiLogin = (username, password) =>
   api.post('/auth/login', { username, password }).then((r) => r.data);
 
+export const apiLogin2fa = (session_id, code) =>
+  api.post('/auth/login/2fa', { session_id, code }).then((r) => r.data);
+
 export const apiMe = () => api.get('/auth/me').then((r) => r.data);
+
+export const api2faSetup = () => api.post('/auth/2fa/setup').then((r) => r.data);
+export const api2faVerify = (code) => api.post('/auth/2fa/verify', { code }).then((r) => r.data);
+export const api2faDisable = (password) => api.post('/auth/2fa/disable', { password }).then((r) => r.data);
 
 export const apiChangePassword = (current_password, new_password) =>
   api.post('/auth/change-password', { current_password, new_password }).then((r) => r.data);
@@ -244,6 +257,9 @@ export const apiRunExpiryReminders = () =>
 export const apiSubscriptionBandwidth = (id, days = 14) =>
   api.get(`/subscriptions/${id}/bandwidth`, { params: { days } }).then((r) => r.data.days);
 
+export const apiSubscriptionQuota = (id) =>
+  api.get(`/subscriptions/${id}/quota`).then((r) => r.data);
+
 export const apiExtendSubscription = (id, days, note = '') =>
   api.post(`/subscriptions/${id}/extend`, { days, note }).then((r) => r.data);
 
@@ -371,6 +387,12 @@ export const apiRouterDelete = (id) => api.delete(`/routers-admin/${id}`).then((
 export const apiRouterTest = (id) => api.post(`/routers-admin/${id}/test`).then((r) => r.data);
 export const apiRouterTestConnection = (data) =>
   api.post('/routers-admin/test-connection', data).then((r) => r.data);
+
+export const apiAccessPoints = () => api.get('/access-points').then((r) => r.data.access_points);
+export const apiAccessPointCreate = (payload) => api.post('/access-points', payload).then((r) => r.data);
+export const apiAccessPointPatch = (id, patch) => api.patch(`/access-points/${id}`, patch).then((r) => r.data);
+export const apiAccessPointDelete = (id) => api.delete(`/access-points/${id}`).then((r) => r.data);
+export const apiAccessPointPing = (id) => api.post(`/access-points/${id}/ping`).then((r) => r.data);
 
 // ---------- Hotspot management ----------
 function hsParams(routerId) { return routerId != null ? { params: { routerId } } : {}; }

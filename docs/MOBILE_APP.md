@@ -23,14 +23,23 @@ Store / App Store or ship push notifications.
 From the `frontend/` folder:
 
 ```bash
-npm run cap:install          # pulls @capacitor/* dev deps
-npm run cap:init             # creates android/ + ios/ project folders
-npm run cap:add-android
+npm install                  # ensures @capacitor/core + push-notifications (already in package.json)
+npm run cap:install          # optional: adds CLI + android/ios packages if you trimmed deps
+```
+
+`capacitor.config.ts` is already in the repo (`org.skynity.isp`, web dir `dist`).
+**Do not run `cap:init`** if that file exists — it would overwrite the app id.
+
+Create native projects when the folders are missing:
+
+```bash
+npm run cap:add-android      # creates android/ when not present
 npm run cap:add-ios          # macOS only
 ```
 
-`capacitor.config.ts` is already committed — app id `org.skynity.isp`,
-name `Skynity ISP`, web dir `dist`.
+If you truly need a fresh Capacitor project, remove `android/`, `ios/`, and
+`capacitor.config.ts` first, then run `npm run cap:init` with the same app id
+as documented in `frontend/package.json` (`Skynity` / `org.skynity.isp`).
 
 ## 3. Rebuild + sync after web changes
 

@@ -115,7 +115,7 @@ export async function pickRouterForNewSubscription() {
 /**
  * Find-or-create a customer record from order data.
  */
-export async function findOrCreateCustomer({ full_name, phone, telegram_id, telegram_username }) {
+export async function findOrCreateCustomer({ full_name, phone, telegram_id, telegram_username, resellerId = null }) {
   // prefer phone as the unique key
   let customer = await db.queryOne('SELECT * FROM customers WHERE phone = ?', [phone]);
   if (customer) {
@@ -126,14 +126,21 @@ export async function findOrCreateCustomer({ full_name, phone, telegram_id, tele
         [telegram_id, telegram_username || null, customer.id]
       );
     }
+    if (resellerId && !customer.reseller_id) {
+      await db.query(
+        'UPDATE customers SET reseller_id = COALESCE(reseller_id, ?) WHERE id = ?',
+        [resellerId, customer.id]
+      );
+      customer = await db.queryOne('SELECT * FROM customers WHERE id = ?', [customer.id]);
+    }
     return customer;
   }
 
   const code = await generateCustomerCode();
   const result = await db.query(
-    `INSERT INTO customers (customer_code, full_name, phone, telegram_id, telegram_username, status)
-     VALUES (?, ?, ?, ?, ?, 'active')`,
-    [code, full_name, phone, telegram_id || null, telegram_username || null]
+    `INSERT INTO customers (customer_code, full_name, phone, telegram_id, telegram_username, status, reseller_id)
+     VALUES (?, ?, ?, ?, ?, 'active', ?)`,
+    [code, full_name, phone, telegram_id || null, telegram_username || null, resellerId]
   );
   return await db.queryOne('SELECT * FROM customers WHERE id = ?', [result.insertId]);
 }
@@ -149,7 +156,10 @@ export async function findOrCreateCustomer({ full_name, phone, telegram_id, tele
  *               back to 'active'. Credentials are preserved so the
  *               customer doesn't need to reconfigure anything.
  */
-export async function approveOrderAndProvision({ orderId, adminId }) {
+export async function approveOrderAndProvision({ orderId, admin }) {
+  const adminId = admin?.id ?? null;
+  const resellerStamp = admin?.role === 'reseller' ? adminId : null;
+
   const order = await db.queryOne('SELECT * FROM orders WHERE id = ?', [orderId]);
   if (!order) throw new Error('Order not found');
   if (order.status === 'approved') throw new Error('Order already approved');
@@ -163,7 +173,7 @@ export async function approveOrderAndProvision({ orderId, adminId }) {
 
   // ---- Renewal branch --------------------------------------------------
   if (order.renewal_of_subscription_id) {
-    return await approveRenewal({ order, pkg, adminId, orderMac });
+    return await approveRenewal({ order, pkg, adminId, orderMac, resellerStamp });
   }
 
   // ---- Fresh-subscription branch --------------------------------------
@@ -173,6 +183,7 @@ export async function approveOrderAndProvision({ orderId, adminId }) {
     full_name: order.full_name,
     phone: order.phone,
     telegram_id: order.telegram_id,
+    resellerId: resellerStamp,
   });
 
   const login = await generateUniqueLogin(pkg.service_type);
@@ -187,12 +198,13 @@ export async function approveOrderAndProvision({ orderId, adminId }) {
     `INSERT INTO subscriptions
        (customer_id, package_id, router_id, service_type, login_username, login_password,
         mac_address, bind_to_mac,
-        starts_at, expires_at, status, mt_synced)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 0)`,
+        starts_at, expires_at, status, mt_synced, reseller_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 0, ?)`,
     [
       customer.id, pkg.id, useRouterId, pkg.service_type, login, password,
       orderMac, bindThis ? 1 : 0,
       now, expires,
+      resellerStamp,
     ]
   );
   const subscriptionId = subResult.insertId;
@@ -243,9 +255,10 @@ export async function approveOrderAndProvision({ orderId, adminId }) {
   await db.query(
     `UPDATE orders
      SET status = 'approved', approved_by = ?, approved_at = NOW(),
-         customer_id = ?, subscription_id = ?
+         customer_id = ?, subscription_id = ?,
+         reseller_id = COALESCE(reseller_id, ?)
      WHERE id = ?`,
-    [adminId, customer.id, subscriptionId, orderId]
+    [adminId, customer.id, subscriptionId, resellerStamp, orderId]
   );
 
   // also mark payment as verified
@@ -285,7 +298,7 @@ export async function approveOrderAndProvision({ orderId, adminId }) {
  * bring it back to 'active'. We reuse the same MikroTik user, just
  * re-enable it in case it was disabled by the expiry cron.
  */
-async function approveRenewal({ order, pkg, adminId, orderMac }) {
+async function approveRenewal({ order, pkg, adminId, orderMac, resellerStamp = null }) {
   const sub = await db.queryOne(
     'SELECT * FROM subscriptions WHERE id = ?',
     [order.renewal_of_subscription_id]
@@ -376,12 +389,24 @@ async function approveRenewal({ order, pkg, adminId, orderMac }) {
   await syncToRadius(refreshed, pkg, 'upsert');
   await syncToRadius(refreshed, pkg, 'enable');
 
+  if (resellerStamp) {
+    await db.query(
+      'UPDATE subscriptions SET reseller_id = COALESCE(reseller_id, ?) WHERE id = ?',
+      [resellerStamp, sub.id]
+    );
+    await db.query(
+      'UPDATE customers SET reseller_id = COALESCE(reseller_id, ?) WHERE id = ?',
+      [resellerStamp, sub.customer_id]
+    );
+  }
+
   await db.query(
     `UPDATE orders
        SET status = 'approved', approved_by = ?, approved_at = NOW(),
-           customer_id = ?, subscription_id = ?
+           customer_id = ?, subscription_id = ?,
+           reseller_id = COALESCE(reseller_id, ?)
      WHERE id = ?`,
-    [adminId, sub.customer_id, sub.id, order.id]
+    [adminId, sub.customer_id, sub.id, resellerStamp, order.id]
   );
 
   await db.query(

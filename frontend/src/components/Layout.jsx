@@ -78,6 +78,7 @@ const GROUPS = [
     label: 'nav.network',
     items: [
       { to: '/routers',          label: 'nav.routers',    icon: RouterIcon },
+      { to: '/access-points',    label: 'Access points',  icon: Wifi },
       { to: '/hotspot',          label: 'Hotspot',        icon: Wifi },
       { to: '/hotspot-template', label: 'Portal Template',icon: Palette },
       { to: '/vpn',              label: 'VPN',            icon: Shield },

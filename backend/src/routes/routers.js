@@ -17,17 +17,18 @@ router.post('/', requireAdmin, requireRole('superadmin', 'admin'), async (req, r
   const required = ['name', 'host', 'username', 'password'];
   for (const k of required) if (!b[k]) return res.status(400).json({ error: `missing ${k}` });
   try {
+    const radiusEnc = b.radius_secret ? encrypt(b.radius_secret) : null;
     const r = await db.query(
       `INSERT INTO mikrotik_routers
          (name, host, port, username, password_enc, use_ssl, is_default, is_active, note,
-          radius_enabled, radius_secret, radius_nas_ip, radius_nas_shortname, radius_coa_port)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+          radius_enabled, radius_secret_plain, radius_secret_enc, radius_nas_ip, radius_nas_shortname, radius_coa_port)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, ?, ?, ?, ?)`,
       [
         b.name, b.host, b.port || 443, b.username,
         encrypt(b.password), b.use_ssl === false ? 0 : 1,
         b.is_default ? 1 : 0, b.note || null,
         b.radius_enabled ? 1 : 0,
-        b.radius_secret || null,
+        radiusEnc,
         b.radius_nas_ip || null,
         b.radius_nas_shortname || b.name,
         Number(b.radius_coa_port) || 3799,
@@ -57,10 +58,17 @@ router.patch('/:id', requireAdmin, requireRole('superadmin', 'admin'), async (re
   const b = req.body || {};
   const allowed = [
     'name', 'host', 'port', 'username', 'use_ssl', 'is_default', 'is_active', 'note',
-    'radius_enabled', 'radius_secret', 'radius_nas_ip', 'radius_nas_shortname', 'radius_coa_port',
+    'radius_enabled', 'radius_nas_ip', 'radius_nas_shortname', 'radius_coa_port',
   ];
   const entries = Object.entries(b).filter(([k]) => allowed.includes(k));
   if (b.password) entries.push(['password_enc', encrypt(b.password)]);
+  if (Object.prototype.hasOwnProperty.call(b, 'radius_secret')) {
+    if (b.radius_secret) {
+      entries.push(['radius_secret_enc', encrypt(b.radius_secret)], ['radius_secret_plain', null]);
+    } else {
+      entries.push(['radius_secret_enc', null], ['radius_secret_plain', null]);
+    }
+  }
   if (!entries.length) return res.status(400).json({ error: 'nothing to update' });
   const set = entries.map(([k]) => `${k} = ?`).join(', ');
   await db.query(`UPDATE mikrotik_routers SET ${set} WHERE id = ?`, [...entries.map(([, v]) => v), id]);
@@ -73,7 +81,7 @@ router.patch('/:id', requireAdmin, requireRole('superadmin', 'admin'), async (re
   if (touchedRadius) {
     try {
       const fresh = await db.queryOne('SELECT * FROM mikrotik_routers WHERE id = ?', [id]);
-      if (fresh?.radius_nas_ip && fresh?.radius_secret) await radius.upsertNas(fresh);
+      if (fresh?.radius_nas_ip && radius.getRadiusSecretForRouter(fresh)) await radius.upsertNas(fresh);
     } catch { /* non-fatal */ }
   }
 

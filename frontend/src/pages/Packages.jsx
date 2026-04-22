@@ -99,6 +99,7 @@ function NewPackageForm({ onClose }) {
     rate_up_mbps: 10, rate_down_mbps: 10,
     duration_days: 30, price: 500,
     mikrotik_profile: '',
+    monthly_quota_gb: '',
   });
   const [err, setErr] = useState('');
 
@@ -146,6 +147,9 @@ function NewPackageForm({ onClose }) {
         </Field>
         <Field label="Price (BDT)">
           <input type="number" step="0.01" className="input" value={form.price} onChange={up('price')} required />
+        </Field>
+        <Field label="Monthly quota (GB, empty = unlimited)">
+          <input type="number" className="input" value={form.monthly_quota_gb} onChange={up('monthly_quota_gb')} placeholder="e.g. 500" min="0" />
         </Field>
         {err && (
           <div className="col-span-2 text-red text-sm font-mono px-3 py-2 border border-red/40 bg-red/5 rounded-sm">

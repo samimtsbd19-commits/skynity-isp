@@ -28,7 +28,22 @@ import {
 } from './claude-commands.js';
 import { registerQuickCommands } from './quick-commands.js';
 
-const { BKASH_NUMBER, NAGAD_NUMBER, CURRENCY_SYMBOL, UPLOAD_DIR } = config;
+const { CURRENCY_SYMBOL, UPLOAD_DIR } = config;
+
+async function botPaymentNumbers() {
+  const [bn, bt, nn, nt] = await Promise.all([
+    getSetting('payment.bkash_number'),
+    getSetting('payment.bkash_type'),
+    getSetting('payment.nagad_number'),
+    getSetting('payment.nagad_type'),
+  ]);
+  return {
+    bkashNum: (bn != null && String(bn).trim()) || config.BKASH_NUMBER || '',
+    bkashType: (bt != null && String(bt).trim()) || config.BKASH_TYPE || 'personal',
+    nagadNum: (nn != null && String(nn).trim()) || config.NAGAD_NUMBER || '',
+    nagadType: (nt != null && String(nt).trim()) || config.NAGAD_TYPE || 'personal',
+  };
+}
 
 // These resolve at startBot() time — DB first, env fallback. See resolveCreds().
 let TELEGRAM_BOT_TOKEN = config.TELEGRAM_BOT_TOKEN || null;
@@ -277,13 +292,16 @@ bot.on('callback_query', async (cq) => {
       }
       const [action, orderIdStr] = data.split(':');
       const orderId = Number(orderIdStr);
-      const adminRow = await db.queryOne('SELECT id FROM admins WHERE telegram_id = ?', [String(tgId)]);
+      const adminRow = await db.queryOne('SELECT id, role FROM admins WHERE telegram_id = ?', [String(tgId)]);
       const adminDbId = adminRow?.id || null;
 
       if (action === 'approve') {
         await bot.answerCallbackQuery(cq.id, { text: 'Processing…' });
         try {
-          const result = await approveOrderAndProvision({ orderId, adminId: adminDbId });
+          const result = await approveOrderAndProvision({
+            orderId,
+            admin: adminRow || { id: adminDbId, role: 'admin' },
+          });
           await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
             chat_id: chatId, message_id: cq.message.message_id,
           });
@@ -388,13 +406,17 @@ bot.on('message', async (msg) => {
       session.data.orderCode = orderCode;
       await setSession(tgId, 'awaiting_trx', session.data);
 
+      const payNums = await botPaymentNumbers();
       await bot.sendMessage(
         chatId,
         `🧾 *Order created:* \`${orderCode}\`\n\n` +
           `💵 *Amount to pay:* ${CURRENCY_SYMBOL}${Number(pkg.price).toFixed(2)}\n\n` +
-          `📱 *Send to one of:*\n` +
-          (BKASH_NUMBER ? `• bKash (Personal): \`${BKASH_NUMBER}\`\n` : '') +
-          (NAGAD_NUMBER ? `• Nagad (Personal): \`${NAGAD_NUMBER}\`\n` : '') +
+          `📱 *Send Money to:*\n` +
+          (payNums.bkashNum ? `• bKash (${payNums.bkashType}): \`${payNums.bkashNum}\`\n` : '') +
+          (payNums.nagadNum ? `• Nagad (${payNums.nagadType}): \`${payNums.nagadNum}\`\n` : '') +
+          (!payNums.bkashNum && !payNums.nagadNum
+            ? `• (Configure payment numbers in Admin → System Settings → Payment, or BKASH_NUMBER / NAGAD_NUMBER in .env)\n`
+            : '') +
           `\nAfter sending, reply with the *Transaction ID* (TrxID).`,
         { parse_mode: 'Markdown' }
       );
